@@ -15,14 +15,16 @@ The manager organizes files under your base directory (default: `~/Documents/sim
 
 ```text
 Documents/
-└── simple_experiment_manager/       # base_dir
-    └── experiments/                 # experiment_root (experiment_root_name)
-        ├── experiment_index.json    # Global experiment index and labels
-        ├── experiment_001/          # Individual experiment directory
+└── simple_experiment_manager/       # Project directory (base_dir)
+    └── experiments/                 # Experiment root (experiment_root_name)
+        ├── experiment_index.json    # Global experiment index and labels (index_file_name)
+        ├── exp_001/          　　　　　　　# Individual physical experiment directory
         │   └── config.yaml          # Experiment-specific configuration
-        └── experiment_002/
+        └── exp_002/
             └── config.yaml
 ```
+
+Note that experiments are managed by the corresponding logical names in the index file.
 
 ## 🛠 Installation
 
@@ -69,15 +71,26 @@ from simple_experiment_manager.manager import ExperimentManager
 
 manager = ExperimentManager(experiment_ctx)
 
-# Access experiment properties
-print(f"Active Experiment: {manager.active_experiment}")
-print(f"Config Path: {manager.active_experiment_config_file}") # absolute path
-print(f"Experiment Dir: {manager.active_experiment_dir}") # absolute path
+# --- Operation Example ---
+# Methods return an `OperationStatus` object. 
+# You can check success and print a concise summary.
+status = manager.create_experiment(name="baseline")
+print(status.summary)  # e.g., "Success: Experiment 'baseline' created."
 
-# Retrieve the configuration instance
-res = manager.get_active_experiment_config()
-if res.is_success and res.config:
-    config = res.config
+# --- Retrieval Example ---
+# Retrieval methods return a tuple: (OperationStatus, Data)
+status, config = manager.get_experiment_config()
+if status.is_success:
+    # Use the config object (Pydantic model or ConfigClass)
+    print(f"Loaded config: {config}")
+else:
+    print(f"Error: {status.message}")
+
+# --- Unpacking Style ---
+# You can also unpack the nested status for even cleaner code
+(ok, msg), usage = manager.get_label_usage()
+if ok:
+    print(usage)
 ```
 
 For a comprehensive demonstration of API, checkout [examples/sample_script.py](src/simple_experiment_manager/examples/sample_script.py):
@@ -90,13 +103,29 @@ This generates the experiment index file (`experiment_index.json`) as:
 
 ```json
 {
-  "active_experiment": "exp_001",
-  "global_labels": ["label1", "label2"],
+  "active_experiment": "tuned_v1",
+  "global_labels": [
+    "training",
+    "cpu"
+  ],
   "experiments": {
-    "exp_001": {
-      "created_at": "2026-02-22T16:14:53.443904",
-      "labels": ["label1"],
-      "config_path": "exp_001/config.yaml"
+    "baseline": {
+      "created_at": "2026-05-07T01:38:47.683077",
+      "labels": [
+        "training",
+        "cpu"
+      ],
+      "relative_config_path": "exp_001/config.yaml",
+      "description": "Finished training: accuracy reached 95%"
+    },
+    "tuned_v1": {
+      "created_at": "2026-05-07T01:38:47.684580",
+      "labels": [
+        "training",
+        "cpu"
+      ],
+      "relative_config_path": "exp_002/config.yaml",
+      "description": "Updated learning rate for tuning"
     }
   }
 }
@@ -213,43 +242,52 @@ The primary interface for experiment operations.
 
 #### Properties
 
-- `active_experiment`: Returns the name of the currently active experiment (`str | None`).
-- `active_experiment_dir`: Returns the absolute `Path` to the active experiment folder.
-- `active_experiment_config_file`: Returns the absolute `Path` to the active experiment's config file.
-- `experiments`: Returns a `set` of all registered experiment names.
-- `global_labels`: Returns a `set` of all registered global labels.
+- `experiments`: `list[str]` of all registered logical experiment names.
+- `global_labels`: `list[str]` of all registered global labels.
+- `active_experiment`: Name of the active experiment (`str | None`).
+- `active_experiment_metadata`: `ExperimentMetadata` for the active experiment.
+- `active_experiment_dir`: The absolute `Path` to the active experiment directory.
+- `active_experiment_config_file`: The absolute `Path` to the active experiment's config file.
 
 #### Key Methods
 
-- `create_experiment(name, config)`: Initializes a new experiment directory and config.
-- `set_active_experiment(name)`: Switches the current active context.
-- `get_active_experiment_config()`: Returns the validated config instance of the active experiment.
-- `update_active_experiment_config(config)`: Updates the active experiment's config file.
-- `copy_experiment(src, dst)`: Duplicates an existing experiment.
+**Note**: Most methods take an optional `name` argument. If `None`, the active experiment is targeted.
+
+- `create_experiment(name, config, description, dir_name)`: Initializes a new experiment directory and config.
+- `set_active_experiment(name)`: Set an active experiment.
+- `unset_active_experiment(name)`: Unset the active experiment, as `None`.
 - `delete_experiment(name)`: Deletes a experiment directory and removes it from the index.
-- `rename_active_experiment(new_name)`: Renames the active experiment name.
-- `add_global_label(name)`: Adds a new label to the global label set.
-- `remove_global_label(name)`: Removes a label from the global label set and from all the experiments.
-- `update_active_experiment_labels(labels)`: Updates labels for the currently active experiment.
-- `get_label_usage()`: Returns a mapping of labels to the experiments using them.
-- `get_active_experiment_label_map()`: Gets a map of all global labels and whether they are assigned to the active experiment.
+- `copy_experiment(src_name, dst_name, dst_dir_name, description)`: Duplicates an existing experiment.
+- `update_experiment_config(config, name)`: Updates the config of the specified experiment.
+- `rename_experiment(new_name, old_name)`: Renames the logical experiment name.
+- `get_experiment_config(name)`: Returns the validated config instance of the specified experiment as a tuple (`OperationStatus`, config).
+- `add_labels_to_experiment(labels, name)`: Adds a label list to the specified experiment, and then updates the global labels.
+- `remove_global_labels(labels)`: Removes a label list from the global label list and from all the experiments.
+- `update_experiment_labels(labels, name)`: Updates labels for the specified experiment.
+- `update_experiment_description(description, name)`: Updates the description for the specified experiment.
+- `get_label_usage()`: Returns a mapping of labels to the experiments using them as a tuple (`OperationStatus`, usage).
+- `get_experiment_label_map(name)`: Gets a map of all global labels and whether they are assigned to the specified experiment as a tuple (`OperationStatus`, label_map).
+- `get_experiment_metadata(name)`: Gets the metadata for the specified experiment.
+- `get_experiment_dir(name)`: Gets the directory path for the specified experiment.
+- `get_experiment_config_file(name)`: Gets the configuration file path for the specified experiment.
 
 ## 🛠 CLI Commands
 
 ### Experiment Management (experiment)
 
 - **list**: List all experiments with their active status and labels.
-- **create**: Create a new experiment (opens editor if defaults are insufficient).
+- **create**: Create a new experiment (opens editor for configuration).
 - **switch**: Set a specific experiment as the active one.
 - **update**: Re-edit the active experiment's configuration in your editor.
 - **show**: Display the active configuration with YAML syntax highlighting.
 - **rename**: Rename an existing experiment.
 - **copy**: Create a new experiment by copying an existing one.
 - **delete**: Delete an experiment directory and its index entry.
+- **describe**: Update a description for a specific experiment.
 
 ### Label Management (label)
 
 - **list**: Show global labels and usage counts. Use --verbose to see experiment names.
-- **add**: Register a new label globally.
+- **add**: Register new labels to a specific experiment and globally.
 - **assign**: Assign/unassign labels to the active experiment via a YAML-based checkbox editor.
 - **remove**: Delete a label from the global list and all assigned experiments.

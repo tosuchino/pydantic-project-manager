@@ -10,11 +10,10 @@ from simple_experiment_manager.cli.editor import (
 )
 from simple_experiment_manager.cli.utils import (
     console,
-    handle_result,
     initialize_context,
     resolve_manager,
 )
-from simple_experiment_manager.manager import ExperimentManager
+from simple_experiment_manager.manager import ExperimentManager, OperationStatus
 from simple_experiment_manager.schemas.contexts import ExperimentContext
 
 experiment_app = typer.Typer(
@@ -28,25 +27,67 @@ def callback(ctx: typer.Context) -> None:
 
 
 @experiment_app.command(name="list")
-def command_list_experiment(ctx: typer.Context):
+def command_list_experiment(
+    ctx: typer.Context,
+    is_sort_by_date: bool = typer.Option(
+        False, "--date", "-d", help="Sort experiments by creation date (newest first)."
+    ),
+):
     """Lists all experiments in the current library."""
     manager: ExperimentManager = resolve_manager(ctx)
+    index = manager.index
 
+    # early return for no experiments
+    if not index.experiments:
+        console.print("[yellow]No experiments registered yet.[/yellow]")
+        return
+
+    # table configuration
     table = Table(
-        title=f"Experiments in [bold cyan]{manager.ctx.experiment_root.parent.name}[/bold cyan]"
+        title=f"Managed Experiments in [bold cyan]{manager.project_name}[/bold cyan]",
+        header_style="bold magenta",
+        show_header=True,
+        box=None,
     )
-    table.add_column("Active", justify="center", style="yellow")
-    table.add_column("Name", style="magenta")
-    table.add_column("Labels", style="green")
 
-    for name in sorted(manager.experiments):
-        is_active = "[bold]*[/bold]" if name == manager.active_experiment else ""
+    # column configuration
+    table.add_column("Active", justify="center", style="green")
+    table.add_column("Experiment Name (Logical)", style="cyan", no_wrap=True)
+    table.add_column("Directory (Physical)", style="blue")
+    table.add_column("Labels", style="yellow")
+    table.add_column("Description", style="white", overflow="fold")
+    table.add_column("Created At", style="dim", justify="right")
 
-        # get labels via manager.index
-        experiment_meta = manager.index.experiments.get(name) if manager.index else None
-        labels = ", ".join(experiment_meta.labels) if experiment_meta else ""
+    # experiment list
+    experiment_names = manager.experiments
+    if is_sort_by_date:
+        experiment_names.sort(
+            key=lambda n: index.get_experiment_metadata(n).created_at, reverse=True
+        )
+    else:
+        experiment_names.sort()
 
-        table.add_row(is_active, name, labels)
+    # add experiment rows to the table
+    for name in experiment_names:
+        meta = index.get_experiment_metadata(name)
+
+        # format experiment metadata
+        is_active = (
+            "[bold]*[/bold]" if name == manager.active_experiment else ""
+        )  # active symbol
+        labels = ", ".join(meta.labels) if meta.labels else "-"  # labels
+        desc = meta.description if meta.description else "-"  # description
+        created_str = meta.created_at.strftime("%Y-%m-%d %H:%M")  # datetime string
+
+        # add formatted values
+        table.add_row(
+            is_active,
+            name,
+            meta.dir_name,
+            labels,
+            desc,
+            created_str,
+        )
 
     console.print(table)
 
@@ -55,6 +96,12 @@ def command_list_experiment(ctx: typer.Context):
 def command_create_experiment(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="Experiment name to create."),
+    description: str = typer.Option(
+        "",
+        "--message",
+        "-m",
+        help="A brief summary for the experiment. Defaults to the empty string.",
+    ),
 ) -> None:
     """Creates a new experiment."""
     # experiment context
@@ -63,15 +110,21 @@ def command_create_experiment(
 
     # validate experiment existence
     if name in manager.experiments:
-        handle_result(is_success=False, message=f"Experiment '{name}' already exists.")
+        failed_status = OperationStatus(
+            is_success=False, message=f"Experiment '{name}' already exists."
+        )
+        print(failed_status.summary)
+        return
 
     # edit config instance via editor
     data = build_template_dict_from_config_class(experiment_ctx.default_config)
     config_inst = edit_config_via_editor(ctx=experiment_ctx, data=data)
 
     # run and show the result
-    res = manager.create_experiment(name=name, config=config_inst)
-    handle_result(is_success=res.is_success, message=res.message)
+    status = manager.create_experiment(
+        name=name, config=config_inst, description=description
+    )
+    print(status.summary)
 
 
 @experiment_app.command(name="rename")
@@ -80,10 +133,10 @@ def command_rename_experiment(
     old_name: str = typer.Argument(..., help="Current experiment name."),
     new_name: str = typer.Argument(..., help="New experiment name."),
 ):
-    """Rename an existing experiment."""
+    """Renames an existing experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.rename_experiment(old_name=old_name, new_name=new_name)
-    handle_result(is_success=res.is_success, message=res.message)
+    status = manager.rename_experiment(old_name=old_name, new_name=new_name)
+    print(status.summary)
 
 
 @experiment_app.command(name="delete")
@@ -94,15 +147,15 @@ def command_delete_experiment(
         False, "--force", "-f", help="Delete without confirmation."
     ),
 ):
-    """Delete a experiment and its directory."""
+    """Deletes a experiment and its directory."""
     if not force:
         confirm = typer.confirm(f"Are you sure you want to delete '{name}'?")
         if not confirm:
             raise typer.Abort()
 
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.delete_experiment(name)
-    handle_result(is_success=res.is_success, message=res.message)
+    status = manager.delete_experiment(name)
+    print(status.summary)
 
 
 @experiment_app.command(name="switch")
@@ -110,48 +163,62 @@ def command_switch_experiment(
     ctx: typer.Context,
     name: str = typer.Argument(..., help="The experiment name to switch."),
 ):
-    """Swithes the active experiment."""
+    """Switches the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.set_active_experiment(name)
-    handle_result(is_success=res.is_success, message=res.message)
+    status = manager.set_active_experiment(name)
+    print(status.summary)
 
 
 @experiment_app.command(name="show")
-def command_show_experiment(ctx: typer.Context):
+def command_show_experiment(
+    ctx: typer.Context,
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Target experiment name. If None, the active experiment is used.",
+    ),
+):
     """Shows the configuration for the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.get_active_experiment_config()
-    if res.is_success and res.config:
-        config = res.config
+    status, config = manager.get_experiment_config(name)
+    if status.is_success and config:
         if isinstance(config, BaseModel):
             data = config.model_dump(mode="json")
         else:
             data = config.to_dict(mode="json")
+        exp_name = name or manager.active_experiment
         yaml_str = generate_yaml_string(ctx=manager.ctx, data=data)
-        console.print(
-            f"\n[bold cyan]Experiment:[/bold cyan] {manager.active_experiment}"
-        )
+        console.print(f"\n[bold cyan]Experiment:[/bold cyan] {exp_name}")
         console.print(Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True))
     else:
-        handle_result(is_success=res.is_success, message=res.message)
+        print(status.summary)
 
 
 @experiment_app.command(name="update")
-def command_update_experiment(ctx: typer.Context):
+def command_update_experiment(
+    ctx: typer.Context,
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Target experiment name. If None, the active experiment is used.",
+    ),
+):
     """Edits the active experiment's configuration."""
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.get_active_experiment_config()
+    status, config = manager.get_experiment_config(name)
 
-    if not res.is_success or res.config is None:
-        handle_result(False, res.message)
+    if not status.is_success or config is None:
+        print(status.summary)
         return
 
     # update config via the editor
-    data = build_template_dict_from_config_class(res.config)
+    data = build_template_dict_from_config_class(config)
     new_config = edit_config_via_editor(ctx=manager.ctx, data=data)
 
-    update_res = manager.update_active_experiment_config(new_config)
-    handle_result(update_res.is_success, update_res.message)
+    update_status = manager.update_experiment_config(config=new_config, name=name)
+    print(update_status.summary)
 
 
 @experiment_app.command(name="copy")
@@ -159,8 +226,43 @@ def command_copy_experiment(
     ctx: typer.Context,
     src_name: str = typer.Argument(..., help="The experiment name to copy from."),
     dst_name: str = typer.Argument(..., help="The experiment name to copy to."),
+    dst_dir_name: str | None = typer.Option(
+        None,
+        "--dir_name",
+        help="The directory name of the experiment to newly create by copy. If None, automatically assigned. Defaults to None.",
+    ),
+    description: str | None = typer.Option(
+        None,
+        "--message",
+        "-m",
+        help="A new description. If None, copies from the source experiment. Defaults to None.",
+    ),
 ):
     """Creates a new experiment by copying an existing one."""
     manager: ExperimentManager = resolve_manager(ctx)
-    res = manager.copy_experiment(src_name=src_name, dst_name=dst_name)
-    handle_result(is_success=res.is_success, message=res.message)
+    status = manager.copy_experiment(
+        src_name=src_name,
+        dst_name=dst_name,
+        dst_dir_name=dst_dir_name,
+        description=description,
+    )
+    print(status.summary)
+
+
+@experiment_app.command(name="describe")
+def command_describe_experiment(
+    ctx: typer.Context,
+    description: str = typer.Argument(
+        ..., help="New description summary for the experiment."
+    ),
+    name: str | None = typer.Option(
+        None,
+        "--name",
+        "-n",
+        help="Target experiment name. If None, the active experiment is used.",
+    ),
+):
+    """Sets a brief summary or note for an experiment."""
+    manager: ExperimentManager = resolve_manager(ctx)
+    status = manager.update_experiment_description(description=description, name=name)
+    print(status.summary)

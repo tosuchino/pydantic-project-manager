@@ -15,12 +15,6 @@ def add_labels_to_experiment(
         index = io.load_index()
         experiment_name = request.experiment_name
 
-        # validate the experiment existence
-        if experiment_name not in index.experiments:
-            return res_schemas.ResponseAddLabelsToExperiment(
-                is_success=False, message=f"Experiment '{experiment_name}' not found."
-            )
-
         # early return if input labels are empty
         if not request.labels:
             return res_schemas.ResponseAddLabelsToExperiment(
@@ -28,23 +22,26 @@ def add_labels_to_experiment(
                 message="No labels provided; nothing changed.",
                 current_index=index,
             )
-
-        current_experiment_labels = index.experiments[experiment_name].labels
-        current_global_labels = index.global_labels
         new_labels = request.labels
 
+        # retrive the current label status
+        meta = index.get_experiment_metadata(experiment_name)
+        current_experiment_labels = meta.labels
+        current_global_labels = index.global_labels
+
         # update the experiment label list and global label list
-        index.experiments[experiment_name].labels = ensure_unique_list(
-            current_experiment_labels + new_labels
-        )
+        meta.labels = ensure_unique_list(current_experiment_labels + new_labels)
         index.global_labels = ensure_unique_list(current_global_labels + new_labels)
 
         # save the updated index
         io.save_index(index)
 
+        # get the newly added labels set
+        added = set(request.labels) - set(current_experiment_labels)
+
         return res_schemas.ResponseAddLabelsToExperiment(
             is_success=True,
-            message=f"Added labels {new_labels} to the experiment '{experiment_name}'.",
+            message=f"Added labels {added} to the experiment '{experiment_name}'.",
             current_index=index,
         )
     except Exception as e:
@@ -71,18 +68,8 @@ def remove_global_labels(
                 message=f"No labels to remove from the global labels: '{target_labels}'.",
             )
 
-        # remove the labels from global label list
-        index.global_labels = [
-            label for label in index.global_labels if label not in target_labels_set
-        ]
-
-        # remove the labels from all experiments
-        for experiment_meta in index.experiments.values():
-            experiment_meta.labels = [
-                label
-                for label in experiment_meta.labels
-                if label not in target_labels_set
-            ]
+        # remove the labels from global label list and cleanup
+        index.purge_global_labels(target_labels)
 
         # save the updated index
         io.save_index(index)
@@ -104,13 +91,8 @@ def update_experiment_labels(
     io = ExperimentDataIO(context)
     try:
         index = io.load_index()
-
-        # validate the experiment existence
-        if request.experiment_name not in index.experiments:
-            return res_schemas.ResponseUpdateExperimentLabels(
-                is_success=False,
-                message=f"Experiment '{request.experiment_name}' not found.",
-            )
+        experiment_name = request.experiment_name
+        meta = index.get_experiment_metadata(experiment_name)
 
         # validate the subset relationship (request.labels ⊆ index.global_labels)
         req_labels_set = set(request.labels)
@@ -123,9 +105,7 @@ def update_experiment_labels(
             )
 
         # update and save index
-        index.experiments[request.experiment_name].labels = ensure_unique_list(
-            request.labels
-        )
+        meta.labels = ensure_unique_list(request.labels)
         io.save_index(index)
 
         return res_schemas.ResponseUpdateExperimentLabels(
@@ -142,7 +122,7 @@ def update_experiment_labels(
 def get_label_usage(
     request: req_schemas.RequestGetLabelUsage, context: ExperimentContext
 ) -> res_schemas.ResponseGetLabelUsage:
-    """Retrieve a mapping of labels to the experiments that use them."""
+    """Retrieves a mapping of labels to the experiments that use them."""
     io = ExperimentDataIO(context)
     try:
         index = io.load_index()
@@ -169,16 +149,10 @@ def get_experiment_label_map(
     io = ExperimentDataIO(context)
     try:
         index = io.load_index()
+        experiment_name = request.experiment_name
 
-        # validate experiment existence
-        if request.experiment_name not in index.experiments:
-            return res_schemas.ResponseGetExperimentLabelMap(
-                is_success=False,
-                message=f"Experiment '{request.experiment_name}' not found.",
-            )
-
-        # get current labels of the experiment
-        experiment_labels = index.experiments[request.experiment_name].labels
+        # retrieve the current labels
+        experiment_labels = index.get_experiment_labels(experiment_name)
 
         # Create the map: {global_label: is_used_by_experiment}
         label_map = {
@@ -187,7 +161,7 @@ def get_experiment_label_map(
 
         return res_schemas.ResponseGetExperimentLabelMap(
             is_success=True,
-            message=f"Successfully retrieved label map for '{request.experiment_name}'.",
+            message=f"Successfully retrieved label map for '{experiment_name}'.",
             label_map=label_map,
         )
     except Exception as e:

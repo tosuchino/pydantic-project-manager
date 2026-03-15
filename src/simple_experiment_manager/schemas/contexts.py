@@ -73,6 +73,17 @@ class ExperimentContext(BaseModel):
             description="Filename for the global experiment index. Supported formats: JSON, YAML."
         ),
     ] = "experiment_index.json"
+    experiment_dir_prefix: Annotated[
+        str, Field(description="Prefix for auto-generated experiment dirctory names.")
+    ] = Field(default="exp_")
+    experiment_dir_digits: Annotated[
+        int,
+        Field(
+            ge=1,
+            le=10,
+            description="Number of digits for auto-generated experiment directory serial numbers.",
+        ),
+    ] = Field(default=3)
     encoding: Annotated[
         str, Field(description="File encoding for the config file.")
     ] = "utf-8"
@@ -113,10 +124,15 @@ class ExperimentContext(BaseModel):
         """Path to the experiment index file."""
         return self.experiment_root / self.index_file_name
 
-    def get_experiment_dir(self, experiment_name: str) -> Path:
-        """Gets the directory path for a specific experiment."""
-        return self.experiment_root / experiment_name
+    @property
+    def project_name(self) -> str:
+        """The name of the project, derived from the base directory name."""
+        return self.base_dir.name
 
-    def get_config_file(self, experiment_name: str) -> Path:
-        """Gets the configuration file path for a specific experiment."""
-        return self.get_experiment_dir(experiment_name) / self.config_file_name
+    def get_experiment_dir(self, dir_name: str) -> Path:
+        """Gets the directory path for a specific experiment directory."""
+        return self.experiment_root / dir_name
+
+    def get_config_file_from_dir(self, dir_name: str) -> Path:
+        """Gets the configuration file path for a specific experiment directory."""
+        return self.get_experiment_dir(dir_name) / self.config_file_name

@@ -12,23 +12,40 @@ class RequestCreateExperiment(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     # fields
-    experiment_name: Annotated[str, Field(description="The experiment name to create.")]
+    experiment_name: Annotated[
+        str | None,
+        Field(
+            description="The identifier for the new experiment to create. If None, the directory name is assigned."
+        ),
+    ] = Field(default=None)
+    dir_name: Annotated[
+        str | None,
+        Field(
+            description="The actual experiment directory name to create. If None, automatically assigned, such as 'exp_001'."
+        ),
+    ] = Field(default=None)
     config: Annotated[
         BaseModel | ConfigClass | None,
         Field(
             description="The actual configuration instance. If None, the default config is used."
         ),
     ] = Field(default=None)
+    description: Annotated[
+        str, Field(description="A brief summary of the experiment to create.")
+    ] = Field(default="")
 
-    @field_validator("experiment_name")
+    @field_validator("dir_name")
     @classmethod
-    def validate_name(cls, v: str) -> str:
-        return validate_safe_name(v)
+    def validate_name(cls, v: str | None) -> str | None:
+        return validate_safe_name(v) if isinstance(v, str) else None
 
 
 class RequestSetActiveExperiment(BaseModel):
     experiment_name: Annotated[
-        str, Field(description="The name of the experiment to set as active.")
+        str | None,
+        Field(
+            description="The name of the experiment to set as active. If None, unsets the active experiment."
+        ),
     ]
 
 
@@ -45,11 +62,23 @@ class RequestCopyExperiment(BaseModel):
     dst_experiment_name: Annotated[
         str, Field(description="The name of the destination experiment to copy to.")
     ]
+    dst_dir_name: Annotated[
+        str | None,
+        Field(
+            description="The actual experiment directory name to create by copy. If None, automatically assigned, such as 'exp_001'"
+        ),
+    ]
+    description: Annotated[
+        str | None,
+        Field(
+            description="A new description for the copied experiment. If None, copies from the source experiment."
+        ),
+    ] = Field(default=None)
 
-    @field_validator("dst_experiment_name")
+    @field_validator("dst_dir_name")
     @classmethod
-    def validate_name(cls, v: str) -> str:
-        return validate_safe_name(v)
+    def validate_name(cls, v: str | None) -> str | None:
+        return validate_safe_name(v) if isinstance(v, str) else None
 
 
 class RequestUpdateExperimentConfig(BaseModel):
@@ -58,10 +87,19 @@ class RequestUpdateExperimentConfig(BaseModel):
 
     # fields
     experiment_name: Annotated[
-        str, Field(description="The name of the experiment to update.")
+        str, Field(description="The name of the experiment to update configuration.")
     ]
     config: Annotated[
         BaseModel | ConfigClass, Field(description="The new configuration instance.")
+    ]
+
+
+class RequestUpdateExperimentDescription(BaseModel):
+    experiment_name: Annotated[
+        str, Field(description="The name of the experiment to update description.")
+    ]
+    description: Annotated[
+        str, Field(description="The new description for the specified experiment.")
     ]
 
 
@@ -72,11 +110,6 @@ class RequestRenameExperiment(BaseModel):
     new_experiment_name: Annotated[
         str, Field(description="The new name of the experiment to rename.")
     ]
-
-    @field_validator("new_experiment_name")
-    @classmethod
-    def validate_name(cls, v: str) -> str:
-        return validate_safe_name(v)
 
 
 class RequestGetExperimentConfig(BaseModel):

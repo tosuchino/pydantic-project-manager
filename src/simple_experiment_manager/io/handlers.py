@@ -24,25 +24,26 @@ class ExperimentDataIO:
 
     def save_config(
         self,
-        experiment_name: str,
+        path: Path,
         config: BaseModel | ConfigClass,
         comments: dict[str, str] | None = None,
     ) -> None:
         """Saves an experiment-specific configuration to the relevant file.
-        
+
         This method handles several key transformations:
         1. Serialization: Converts Pydantic models or ConfigClass instances into JSON-compatible dictionaries.
-        2. Fallback Handling: Any objects that are not natively JSON-serializable 
+        2. Fallback Handling: Any objects that are not natively JSON-serializable
         (e.g., functions, custom classes) are automatically converted to strings.
-        3. Comment Extraction: If `config` is a Pydantic model and `comments` is None, 
+        3. Comment Extraction: If `config` is a Pydantic model and `comments` is None,
         it automatically extracts field descriptions to use as YAML comments.
-        
+
         Args:
-            experiment_name: Unique identifier for the experiment, used as the directory name.
+            path: Path to the configuration file to save.
             config: The configuration instance to save.
             comments: Optional dictionary mapping field names to comments. Overrides auto-extracted descriptions.
         """
-        path = self.ctx.get_config_file(experiment_name)
+        # ensure the given path is within the experiment root
+        path = self._ensure_within_root(path)
 
         target_inst = config if isinstance(config, BaseModel) else config._instance
         data = target_inst.model_dump(mode="json", fallback=lambda v: str(v))
@@ -63,9 +64,8 @@ class ExperimentDataIO:
             encoding=self.ctx.encoding,
         )
 
-    def load_config(self, experiment_name: str) -> BaseModel | ConfigClass:
+    def load_config(self, path: Path) -> BaseModel | ConfigClass:
         """Loads a experiment-specific configuration from the relevant file."""
-        path = self.ctx.get_config_file(experiment_name)
         data = StructuredDataIO.load(path=path, encoding=self.ctx.encoding)
 
         if isinstance(self.ctx.default_config, BaseModel):
@@ -75,7 +75,9 @@ class ExperimentDataIO:
 
     def save_index(self, experiment_index: ExperimentIndex) -> None:
         """Saves the `ExperimentIndex` instance to the index file."""
+        # ensure the index file path is within the experiment root
         path = self.ctx.experiment_index_file
+        path = self._ensure_within_root(path)
         StructuredDataIO.save(
             path=path,
             data=experiment_index.model_dump(mode="json"),
@@ -87,7 +89,10 @@ class ExperimentDataIO:
 
     def load_index(self) -> ExperimentIndex:
         """Loads the `ExperimentIndex` instance from the experiment index file."""
+        # ensure the index file is within the experiment root
         path = self.ctx.experiment_index_file
+        path = self._ensure_within_root(path)
+        
         if not path.exists():
             return ExperimentIndex()
         data = StructuredDataIO.load(
@@ -95,21 +100,44 @@ class ExperimentDataIO:
         )
         return ExperimentIndex.model_validate(data)
 
-    def delete_experiment_data(self, experiment_name: str) -> None:
-        """Deletes the experiment directory and all its contents."""
-        experiment_dir = self.ctx.get_experiment_dir(experiment_name)
-        if experiment_dir.exists() and experiment_dir.is_dir():
-            shutil.rmtree(experiment_dir)
+    def delete_experiment_data(self, path: Path) -> None:
+        """Deletes the experiment directory and all its contents.
 
-    def rename_experiment_dir(self, old_name: str, new_name: str) -> None:
+        Args:
+            path: Path to the experiment directory to delete.
+        """
+        # ensure the given path is within the experiment root
+        target_path = self._ensure_within_root(path)
+
+        if target_path.exists() and target_path.is_dir():
+            shutil.rmtree(target_path)
+
+    def rename_experiment_dir(self, old_path: Path, new_path: Path) -> None:
         """Renames the experiment directory."""
-        old_dir = self.ctx.get_experiment_dir(old_name)
-        new_dir = self.ctx.get_experiment_dir(new_name)
-        if not old_dir.exists():
-            raise FileNotFoundError(f"Source directory '{old_name}' not found.")
-        if new_dir.exists():
-            raise FileExistsError(f"Destination '{new_name}' already exists.")
-        old_dir.rename(new_dir)
+        # ensure the given paths are within the experiment root
+        old_path = self._ensure_within_root(old_path)
+        new_path = self._ensure_within_root(new_path)
+
+        if not old_path.exists():
+            raise FileNotFoundError(f"Source directory '{old_path}' not found.")
+        if new_path.exists():
+            raise FileExistsError(f"Destination '{new_path}' already exists.")
+        old_path.rename(new_path)
+
+    def _ensure_within_root(self, path: Path) -> Path:
+        """Ensures the given path is under the experiment root."""
+        target = path.resolve()
+        experiment_root = self.ctx.experiment_root
+
+        if target == experiment_root:
+            raise ValueError(f"Cannot operate on the experiment root itself: {target}")
+
+        if experiment_root not in target.parents:
+            raise ValueError(
+                f"Safety Violation: {path} is outside of the experiment root: {experiment_root}."
+            )
+
+        return target
 
 
 class StructuredDataIO:
