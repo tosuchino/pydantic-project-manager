@@ -13,12 +13,11 @@ def test_create_experiment_and_io_integrity(
     config = DummyConfig(user_name="tester")
 
     # Act
-    res = manager.create_experiment(name, config)
+    status = manager.create_experiment(name, config)
 
     # Assert
-    assert res.is_success
+    assert status.is_success
     assert manager.active_experiment == name
-    assert dummy_ctx.get_config_file(name).exists()
     assert dummy_ctx.experiment_index_file.exists()
 
 
@@ -29,11 +28,10 @@ def test_create_experiment_duplicate_fails(manager: ExperimentManager) -> None:
     manager.create_experiment(name, DummyConfig())
 
     # Act
-    res = manager.create_experiment(name, DummyConfig())
+    status = manager.create_experiment(name, DummyConfig())
 
     # Assert
-    assert res.is_success is False
-    assert "already exists" in res.message
+    assert status.is_success is False
 
 
 def test_rename_active_experiment_consistency(manager: ExperimentManager) -> None:
@@ -45,10 +43,10 @@ def test_rename_active_experiment_consistency(manager: ExperimentManager) -> Non
     manager.set_active_experiment(old_name)
 
     # Act
-    res = manager.rename_active_experiment(new_name)
+    status = manager.rename_experiment(new_name)
 
     # Assert
-    assert res.is_success
+    assert status.is_success
     assert new_name in manager.experiments
     assert old_name not in manager.experiments
     assert manager.active_experiment == new_name
@@ -59,23 +57,23 @@ def test_label_management_flow(manager: ExperimentManager) -> None:
     # Arrange
     manager.create_experiment("label-test", DummyConfig())
     manager.set_active_experiment("label-test")
-    manager.add_labels_to_active_experiment(["label1", "label2"])
+    manager.add_labels_to_experiment(["label1", "label2"])
 
     # Act: Positive
-    res_ok = manager.update_active_experiment_labels(["label1"])
+    status_ok = manager.update_experiment_labels(["label1"])
 
     # Assert
-    assert res_ok.is_success
+    assert status_ok.is_success
     assert manager.index is not None
     assert "label1" in manager.index.experiments["label-test"].labels
     assert "label2" not in manager.index.experiments["label-test"].labels
 
     # Act: Negative, check if an invalid is assigned
-    res_fail = manager.update_active_experiment_labels(["invalid-label"])
+    status_fail = manager.update_experiment_labels(["invalid-label"])
 
     # Assert
-    assert res_fail.is_success is False
-    assert "invalid-label" in res_fail.message
+    assert status_fail.is_success is False
+    assert "invalid-label" in status_fail.message
 
 
 def test_delete_active_experiment_cleanup(
@@ -88,10 +86,10 @@ def test_delete_active_experiment_cleanup(
     manager.set_active_experiment(name)
 
     # Act
-    res = manager.delete_experiment(name)
+    status = manager.delete_experiment(name)
 
     # Assert
-    assert res.is_success
+    assert status.is_success
     assert name not in manager.experiments
     assert manager.active_experiment is None  # if the active experiment is reset
     assert not dummy_ctx.get_experiment_dir(

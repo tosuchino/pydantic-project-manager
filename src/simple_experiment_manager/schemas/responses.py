@@ -38,6 +38,10 @@ class ResponseUpdateExperimentConfig(BaseResponse):
     pass
 
 
+class ResponseUpdateExperimentDescription(BaseResponse):
+    pass
+
+
 class ResponseRenameExperiment(BaseResponse):
     pass
 
@@ -95,6 +99,7 @@ ExperimentManagerResponse: TypeAlias = (
     | ResponseDeleteExperiment
     | ResponseCopyExperiment
     | ResponseUpdateExperimentConfig
+    | ResponseUpdateExperimentDescription
     | ResponseRenameExperiment
     | ResponseGetExperimentConfig
     | ResponseGetExperimentLabelMap

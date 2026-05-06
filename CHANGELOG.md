@@ -1,5 +1,10 @@
 # Release notes
 
+## v0.3.0
+
+- Separated experiment logical names from physical directory names for better flexibility.
+- Unified return types of manager methods using the new `OperationStatus` class.
+
 ## v0.2.0
 
 - Implemented the ability to add multiple labels to an experiment.
