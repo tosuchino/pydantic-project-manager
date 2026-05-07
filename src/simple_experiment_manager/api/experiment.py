@@ -290,6 +290,36 @@ def get_experiment_config(
         return res_schemas.ResponseGetExperimentConfig(is_success=False, message=str(e))
 
 
+def filter_experiments(
+    request: req_schemas.RequestFilterExperiments, context: ExperimentContext
+) -> res_schemas.ResponseFilterExperiments:
+    """Filters experiments based on specified criteria."""
+    io = ExperimentDataIO(context)
+    try:
+        index = io.load_index()
+        all_experiments = index.experiments
+        # label filter
+        target_labels = request.labels
+        if target_labels is not None:
+            target_set = set(target_labels)
+            label_filtered = {
+                name: meta
+                for name, meta in all_experiments.items()
+                if target_set.issubset(set(meta.labels))
+            }
+        else:
+            label_filtered = all_experiments.copy()
+        return res_schemas.ResponseFilterExperiments(
+            is_success=True,
+            message="Experiments have been successfully filtered.",
+            experiments=list(label_filtered.keys()),
+        )
+    except Exception as e:
+        return res_schemas.ResponseFilterExperiments(
+            is_success=False, message=str(e), experiments=None
+        )
+
+
 # helper functions
 
 

@@ -121,6 +121,15 @@ class RequestGetExperimentConfig(BaseModel):
     ]
 
 
+class RequestFilterExperiments(BaseModel):
+    labels: Annotated[
+        list[str] | None,
+        Field(
+            description="A list of labels for AND-based filtering. If None, label filtering is skipped."
+        ),
+    ] = Field(default=None)
+
+
 # labels
 class RequestAddLabelsToExperiment(BaseModel):
     experiment_name: Annotated[
