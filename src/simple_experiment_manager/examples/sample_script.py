@@ -61,9 +61,26 @@ def main() -> None:
     )
     print(status_desc.summary)
 
+    # --- Add labels to the copied experiment ---
+    status_add_labels = manager.add_labels_to_experiment(labels=["tuned"])
+    print(status_add_labels.summary)
+
     # --- Show the logical name list of experiments ---
     print("\n--- List all logical experiment names ---")
     print(f"Registered experiments: {manager.experiments}")
+
+    # --- Show the filtered experiments ---
+    target_labels = ["tuned"]
+    status_filtered, filtered_experiments = manager.filter_experiments(target_labels)
+    if not status_filtered.is_success:
+        print(f"Error occurred: {status_filtered.summary}")
+    elif not filtered_experiments:
+        print(f"No experiments matched with the labels {target_labels}")
+    else:
+        print("\n--- List filtered logical experiment names ---")
+        print(
+            f"Filtered experiments matched with the labels {target_labels}: {filtered_experiments}"
+        )
 
     # --- Show the statistics of the label usage ---
     print("\n--- Check label usage statistics ---")

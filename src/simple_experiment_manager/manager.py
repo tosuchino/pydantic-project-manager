@@ -301,7 +301,7 @@ class ExperimentManager:
 
     def filter_experiments(
         self, labels: list[str] | None = None
-    ) -> tuple[OperationStatus, list[str] | None]:
+    ) -> tuple[OperationStatus, list[str]]:
         """Filters experiments.
 
         Args:

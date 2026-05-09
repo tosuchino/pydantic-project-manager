@@ -59,7 +59,7 @@ class ResponseGetExperimentConfig(BaseResponse):
 
 class ResponseFilterExperiments(BaseResponse):
     experiments: Annotated[
-        list[str] | None,
+        list[str],
         Field(
             description="A list of logical experiment names that matched all the filter criteria."
         ),

@@ -316,7 +316,7 @@ def filter_experiments(
         )
     except Exception as e:
         return res_schemas.ResponseFilterExperiments(
-            is_success=False, message=str(e), experiments=None
+            is_success=False, message=str(e), experiments=list()
         )
 
 

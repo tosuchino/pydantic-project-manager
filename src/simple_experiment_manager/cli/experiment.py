@@ -50,7 +50,7 @@ def command_list_experiment(
         status, filtered = manager.filter_experiments(target_labels)
 
         # system error
-        if filtered is None:
+        if not status.is_success:
             console.print(f"[bold red]Error:[/bold red] {status.summary}")
             return
 
