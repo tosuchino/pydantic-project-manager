@@ -32,6 +32,9 @@ def command_list_experiment(
     is_sort_by_date: bool = typer.Option(
         False, "--date", "-d", help="Sort experiments by creation date (newest first)."
     ),
+    target_labels: list[str] = typer.Option(
+        "", "--labels", help="Label list to filter experiments."
+    ),
 ):
     """Lists all experiments in the current library."""
     manager: ExperimentManager = resolve_manager(ctx)
@@ -41,6 +44,26 @@ def command_list_experiment(
     if not index.experiments:
         console.print("[yellow]No experiments registered yet.[/yellow]")
         return
+
+    # filter experiments
+    if target_labels:
+        status, filtered = manager.filter_experiments(target_labels)
+
+        # system error
+        if filtered is None:
+            console.print(f"[bold red]Error:[/bold red] {status.summary}")
+            return
+
+        # no matching experiments
+        if not filtered:
+            console.print(
+                f"[yellow]No experiments matched the labels: {', '.join(target_labels)}[/yellow]"
+            )
+            return
+
+        experiment_names = filtered
+    else:
+        experiment_names = manager.experiments.copy()
 
     # table configuration
     table = Table(
@@ -59,7 +82,6 @@ def command_list_experiment(
     table.add_column("Created At", style="dim", justify="right")
 
     # experiment list
-    experiment_names = manager.experiments
     if is_sort_by_date:
         experiment_names.sort(
             key=lambda n: index.get_experiment_metadata(n).created_at, reverse=True

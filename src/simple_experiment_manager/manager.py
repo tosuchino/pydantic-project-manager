@@ -299,6 +299,23 @@ class ExperimentManager:
         except ValueError as e:
             return OperationStatus(is_success=False, message=str(e)), None
 
+    def filter_experiments(
+        self, labels: list[str] | None = None
+    ) -> tuple[OperationStatus, list[str] | None]:
+        """Filters experiments.
+
+        Args:
+            labels: A list of labels to filter experiments. If None, label filtering is skipped. Defaults to None.
+
+        Returns:
+            A tuple of (`OperationStatus`, experiments).
+            It can be unpacked as `(ok, msg), experiments = manager.filter_experiments()`.
+        """
+        req = req_schemas.RequestFilterExperiments(labels=labels)
+        res = api_experiment.filter_experiments(request=req, context=self.ctx)
+        status = OperationStatus(is_success=res.is_success, message=res.message)
+        return status, res.experiments
+
     def add_labels_to_experiment(
         self,
         labels: list[str],
