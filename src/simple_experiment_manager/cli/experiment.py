@@ -15,6 +15,7 @@ from simple_experiment_manager.cli.utils import (
 )
 from simple_experiment_manager.manager import ExperimentManager, OperationStatus
 from simple_experiment_manager.schemas.contexts import ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 
 experiment_app = typer.Typer(
     help="Manage experiments: create, list, delete and rename."
@@ -29,14 +30,19 @@ def callback(ctx: typer.Context) -> None:
 @experiment_app.command(name="list")
 def command_list_experiment(
     ctx: typer.Context,
-    is_sort_by_date: bool = typer.Option(
-        False, "--date", "-d", help="Sort experiments by creation date (newest first)."
+    target_labels: list[str] | None = typer.Option(
+        None,
+        "--label",
+        help="Label to filter experiments. Can be specified multiple times.",
     ),
-    target_labels: list[str] = typer.Option(
-        "", "--labels", help="Label list to filter experiments."
+    sort_by: ExperimentSortKey = typer.Option(
+        ExperimentSortKey.NAME, "--sort_by", help="Sort key."
+    ),
+    reverse: bool = typer.Option(
+        False, "--reverse", help="Sort results in descending order."
     ),
 ):
-    """Lists all experiments in the current library."""
+    """Lists experiments of the project."""
     manager: ExperimentManager = resolve_manager(ctx)
     index = manager.index
 
@@ -45,25 +51,22 @@ def command_list_experiment(
         console.print("[yellow]No experiments registered yet.[/yellow]")
         return
 
-    # filter experiments
-    if target_labels:
-        status, filtered = manager.filter_experiments(target_labels)
+    # filter and sort experiments
+    status, experiment_names = manager.filter_experiments(
+        labels=target_labels, sort_by=sort_by.value, reverse=reverse
+    )
 
-        # system error
-        if not status.is_success:
-            console.print(f"[bold red]Error:[/bold red] {status.summary}")
-            return
+    # system error
+    if not status.is_success:
+        console.print(f"[bold red]Error:[/bold red] {status.summary}")
+        return
 
-        # no matching experiments
-        if not filtered:
-            console.print(
-                f"[yellow]No experiments matched the labels: {', '.join(target_labels)}[/yellow]"
-            )
-            return
-
-        experiment_names = filtered
-    else:
-        experiment_names = manager.experiments.copy()
+    # no matching experiments
+    if not experiment_names and target_labels is not None:
+        console.print(
+            f"[yellow]No experiments matched the labels: {', '.join(target_labels)}[/yellow]"
+        )
+        return
 
     # table configuration
     table = Table(
@@ -80,14 +83,6 @@ def command_list_experiment(
     table.add_column("Labels", style="yellow")
     table.add_column("Description", style="white", overflow="fold")
     table.add_column("Created At", style="dim", justify="right")
-
-    # experiment list
-    if is_sort_by_date:
-        experiment_names.sort(
-            key=lambda n: index.get_experiment_metadata(n).created_at, reverse=True
-        )
-    else:
-        experiment_names.sort()
 
     # add experiment rows to the table
     for name in experiment_names:
