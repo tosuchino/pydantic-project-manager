@@ -6,6 +6,7 @@ from simple_experiment_manager.io.handlers import ExperimentDataIO
 from simple_experiment_manager.schemas import requests as req_schemas
 from simple_experiment_manager.schemas import responses as res_schemas
 from simple_experiment_manager.schemas.contexts import ConfigClass, ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.index import ExperimentIndex, ExperimentMetadata
 
 
@@ -293,7 +294,7 @@ def get_experiment_config(
 def filter_experiments(
     request: req_schemas.RequestFilterExperiments, context: ExperimentContext
 ) -> res_schemas.ResponseFilterExperiments:
-    """Filters experiments based on specified criteria."""
+    """Filters and sorts experiments based on specified criteria."""
     io = ExperimentDataIO(context)
     try:
         index = io.load_index()
@@ -309,10 +310,20 @@ def filter_experiments(
             }
         else:
             label_filtered = all_experiments.copy()
+
+        # sort
+        experiment_names = list(label_filtered.keys())
+        match request.sort_by:
+            case ExperimentSortKey.NAME:
+                experiment_names.sort(reverse=request.reverse)
+            case ExperimentSortKey.CREATED_AT:
+                experiment_names.sort(
+                    key=lambda n: label_filtered[n].created_at, reverse=request.reverse
+                )
         return res_schemas.ResponseFilterExperiments(
             is_success=True,
-            message="Experiments have been successfully filtered.",
-            experiments=list(label_filtered.keys()),
+            message="Experiments have been successfully filtered and sorted.",
+            experiments=experiment_names,
         )
     except Exception as e:
         return res_schemas.ResponseFilterExperiments(

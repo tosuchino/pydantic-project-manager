@@ -3,6 +3,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from simple_experiment_manager.schemas.contexts import ConfigClass
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.validators import validate_safe_name
 
 
@@ -125,9 +126,16 @@ class RequestFilterExperiments(BaseModel):
     labels: Annotated[
         list[str] | None,
         Field(
-            description="A list of labels for AND-based filtering. If None, label filtering is skipped."
+            description="A list of labels for AND-based filtering. If None, label filtering is skipped. Defaults to None."
         ),
     ] = Field(default=None)
+    sort_by: Annotated[
+        ExperimentSortKey,
+        Field(description="Sort key. Defaults to ExperimentSortKey.NAME."),
+    ] = Field(default=ExperimentSortKey.NAME)
+    reverse: Annotated[
+        bool, Field(description="If True, sort in descending order.")
+    ] = False
 
 
 # labels

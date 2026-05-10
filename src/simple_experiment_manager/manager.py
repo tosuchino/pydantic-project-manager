@@ -9,6 +9,7 @@ from simple_experiment_manager.api import label as api_label
 from simple_experiment_manager.schemas import requests as req_schemas
 from simple_experiment_manager.schemas import responses as res_schemas
 from simple_experiment_manager.schemas.contexts import ConfigClass, ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.index import ExperimentIndex, ExperimentMetadata
 
 
@@ -300,18 +301,35 @@ class ExperimentManager:
             return OperationStatus(is_success=False, message=str(e)), None
 
     def filter_experiments(
-        self, labels: list[str] | None = None
+        self,
+        labels: list[str] | None = None,
+        sort_by: str = ExperimentSortKey.NAME.value,
+        reverse: bool = False,
     ) -> tuple[OperationStatus, list[str]]:
-        """Filters experiments.
+        """Filters and sorts experiments.
 
         Args:
             labels: A list of labels to filter experiments. If None, label filtering is skipped. Defaults to None.
+            sort_by: Sort key.　Available keys are defined by `ExperimentSortKey`. Defaults to `ExperimentSortKey.NAME.value`.
+            reverse: If True, sorted by the descending order. Defaults to False.
 
         Returns:
             A tuple of (`OperationStatus`, experiments).
             It can be unpacked as `(ok, msg), experiments = manager.filter_experiments()`.
         """
-        req = req_schemas.RequestFilterExperiments(labels=labels)
+        try:
+            sort_by_enum = ExperimentSortKey(sort_by)
+        except ValueError:
+            valid_keys = [e.value for e in ExperimentSortKey]
+            status = OperationStatus(
+                is_success=False,
+                message=f"Invalid sort_by '{sort_by}'. Must be one of: {', '.join(valid_keys)}",
+            )
+            return status, []
+
+        req = req_schemas.RequestFilterExperiments(
+            labels=labels, sort_by=sort_by_enum, reverse=reverse
+        )
         res = api_experiment.filter_experiments(request=req, context=self.ctx)
         status = OperationStatus(is_success=res.is_success, message=res.message)
         return status, res.experiments
