@@ -53,13 +53,16 @@ class ExperimentManager:
         res = api_index.get_index(request=req, context=self.ctx)
         self._update_state(res)
 
-    def resolve_target_experiment(self, name: str | None) -> str:
+    def _resolve_target_experiment(self, name: str | None) -> str:
         """Returns the experiment name if provided, otherwise the name of the active experiment."""
         target = name or self.active_experiment
         if target is None:
             raise ValueError(
                 "No experiment name provided and no active experiment is set."
             )
+
+        if target not in self.experiments:
+            raise ValueError(f"Experiment not found: {target}")
         return target
 
     # properties
@@ -114,7 +117,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_metadata()
+        _, meta = self.get_experiment_metadata()
+        return meta
 
     @property
     def active_experiment_dir(self) -> Path | None:
@@ -122,7 +126,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_dir()
+        _, dir_path = self.get_experiment_dir()
+        return dir_path
 
     @property
     def active_experiment_config_file(self) -> Path | None:
@@ -130,7 +135,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_config_file()
+        _, config_path = self.get_experiment_config_file()
+        return config_path
 
     # operation methods
     def create_experiment(
@@ -152,7 +158,7 @@ class ExperimentManager:
                 If None, automatically assigned (e.g., 'exp_001'). Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.create_experiment()`.
         """
         req = req_schemas.RequestCreateExperiment(
             experiment_name=name,
@@ -171,7 +177,7 @@ class ExperimentManager:
            name: A experiment name to be active.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.set_active_experiment()`.
         """
         req = req_schemas.RequestSetActiveExperiment(experiment_name=name)
         res = api_experiment.set_active_experiment(request=req, context=self.ctx)
@@ -194,7 +200,7 @@ class ExperimentManager:
            name: A experiment name to delete.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.delete_experiment()`.
         """
         req = req_schemas.RequestDeleteExperiment(experiment_name=name)
         res = api_experiment.delete_experiment(request=req, context=self.ctx)
@@ -218,7 +224,7 @@ class ExperimentManager:
             description: A new description. If None, copies from the source experiment.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.copy_experiment()`.
         """
         req = req_schemas.RequestCopyExperiment(
             src_experiment_name=src_name,
@@ -240,10 +246,10 @@ class ExperimentManager:
             name: The name of the experiment to update. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_config()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentConfig(
                 experiment_name=target_name, config=config
             )
@@ -265,10 +271,10 @@ class ExperimentManager:
             old_name: The old experiment name. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.rename_experiment()`.
         """
         try:
-            target_old_name = self.resolve_target_experiment(old_name)
+            target_old_name = self._resolve_target_experiment(old_name)
             req = req_schemas.RequestRenameExperiment(
                 old_experiment_name=target_old_name, new_experiment_name=new_name
             )
@@ -288,11 +294,11 @@ class ExperimentManager:
             If None, the active experiment. Defaults to None.
 
         Returns:
-            A tuple of (`OperationStatus`, config).
+            A tuple of (An `OperationStatus` instance, config).
             It can be unpacked as `(ok, msg), config = manager.get_experiment_config()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestGetExperimentConfig(experiment_name=target_name)
             res = api_experiment.get_experiment_config(request=req, context=self.ctx)
             status = OperationStatus(is_success=res.is_success, message=res.message)
@@ -314,7 +320,7 @@ class ExperimentManager:
             reverse: If True, sorted by the descending order. Defaults to False.
 
         Returns:
-            A tuple of (`OperationStatus`, experiments).
+            A tuple of (An `OperationStatus` instance, experiments).
             It can be unpacked as `(ok, msg), experiments = manager.filter_experiments()`.
         """
         try:
@@ -337,19 +343,19 @@ class ExperimentManager:
     def add_labels_to_experiment(
         self,
         labels: list[str],
-        experiment_name: str | None = None,
+        name: str | None = None,
     ) -> OperationStatus:
         """Adds labels to the experiment and ensures they are registered in the global label list.
 
         Args:
            labels: A list of label names to add.
-           experiment_name: The experiment name to add labels to. If None, the active experiment name. Defaults to None.
+           name: The experiment name to add labels to. If None, the active experiment name. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.add_labels_to_experiment()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(experiment_name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestAddLabelsToExperiment(
                 labels=labels,
                 experiment_name=target_experiment_name,
@@ -367,7 +373,7 @@ class ExperimentManager:
            labels: A list of label names to remove from the global label list.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.remove_global_lables()`.
         """
         req = req_schemas.RequestRemoveGlobalLabels(labels=labels)
         res = api_label.remove_global_labels(request=req, context=self.ctx)
@@ -386,10 +392,10 @@ class ExperimentManager:
            name: The name of the experiment whose labels will be updated. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_labels()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentLabels(
                 experiment_name=target_experiment_name, labels=labels
             )
@@ -409,10 +415,10 @@ class ExperimentManager:
             name: The name of the experiment to update. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_description()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentDescription(
                 experiment_name=target_experiment_name, description=description
             )
@@ -428,7 +434,7 @@ class ExperimentManager:
         """Gets the label usage, providing a mapping of the labels to the sets of experiment names that use them.
 
         Returns:
-            A tuple of (`OperationStatus`, usage_dict).
+            A tuple of (An `OperationStatus` instance, usage_dict).
             It can be unpacked as `(ok, msg), usage = manager.get_label_usage()`.
         """
         req = req_schemas.RequestGetLabelUsage()
@@ -445,10 +451,11 @@ class ExperimentManager:
             name: The experiment name to acquire the label map. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            A tuple of (An `OperationStatus` instance, label_map).
+            It can be unpacked as `(ok, msg), label_map = manager.get_label_map()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestGetExperimentLabelMap(experiment_name=target_name)
             res = api_label.get_experiment_label_map(request=req, context=self.ctx)
             return OperationStatus(
@@ -460,48 +467,76 @@ class ExperimentManager:
     # information access methods
     def get_experiment_metadata(
         self, name: str | None = None
-    ) -> ExperimentMetadata | None:
+    ) -> tuple[OperationStatus, ExperimentMetadata | None]:
         """Gets the metadata for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            The ExperimentMetadata instance for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, metadata).
+            It can be unpacked as `(ok, msg), meta = manager.get_experiment_metadata()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_metadata(target)
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the experiment metadata.",
+            )
+            meta = self.index.get_experiment_metadata(target)
+            return status, meta
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None
 
-    def get_experiment_dir(self, name: str | None = None) -> Path | None:
+    def get_experiment_dir(
+        self, name: str | None = None
+    ) -> tuple[OperationStatus, Path | None]:
         """Gets the directory path for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            Path to the actual directory for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, exp_dir_path).
+            It can be unpacked as `(ok, msg), exp_dir_path = manager.get_experiment_dir()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_dir(
-            root=self.experiment_root, experiment_name=target
-        )
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the experiment directory path.",
+            )
+            dir_path = self.index.get_experiment_dir(
+                root=self.experiment_root, experiment_name=target
+            )
+            return status, dir_path
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None
 
-    def get_experiment_config_file(self, name: str | None = None) -> Path | None:
+    def get_experiment_config_file(
+        self, name: str | None = None
+    ) -> tuple[OperationStatus, Path | None]:
         """Gets the configuration file path for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            Path to the configuration file for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, config_file_path).
+            It can be unpacked as `(ok, msg), config_file_path = manager.get_config_file()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_config(
-            root=self.experiment_root, experiment_name=target
-        )
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the configuration path.",
+            )
+            config_path = self.index.get_experiment_config(
+                root=self.experiment_root, experiment_name=target
+            )
+            return status, config_path
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None

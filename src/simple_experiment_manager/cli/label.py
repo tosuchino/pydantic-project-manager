@@ -62,7 +62,7 @@ def command_add_labels_to_active_experiment(
 ):
     """Adds labels to a specific experiment (defaults to active experiment)."""
     manager: ExperimentManager = resolve_manager(ctx)
-    status = manager.add_labels_to_experiment(experiment_name=name, labels=labels)
+    status = manager.add_labels_to_experiment(name=name, labels=labels)
     print(status.summary)
 
 

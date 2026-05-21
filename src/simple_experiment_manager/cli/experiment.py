@@ -44,21 +44,20 @@ def command_list_experiment(
 ):
     """Lists experiments of the project."""
     manager: ExperimentManager = resolve_manager(ctx)
-    index = manager.index
 
     # early return for no experiments
-    if not index.experiments:
+    if not manager.experiments:
         console.print("[yellow]No experiments registered yet.[/yellow]")
         return
 
     # filter and sort experiments
-    status, experiment_names = manager.filter_experiments(
+    filter_status, experiment_names = manager.filter_experiments(
         labels=target_labels, sort_by=sort_by.value, reverse=reverse
     )
 
     # system error
-    if not status.is_success:
-        console.print(f"[bold red]Error:[/bold red] {status.summary}")
+    if not filter_status.is_success:
+        console.print(f"[bold red]Error:[/bold red] {filter_status.summary}")
         return
 
     # no matching experiments
@@ -86,7 +85,10 @@ def command_list_experiment(
 
     # add experiment rows to the table
     for name in experiment_names:
-        meta = index.get_experiment_metadata(name)
+        meta_status, meta = manager.get_experiment_metadata(name)
+
+        if not meta_status.is_success or meta is None:
+            continue
 
         # format experiment metadata
         is_active = (
