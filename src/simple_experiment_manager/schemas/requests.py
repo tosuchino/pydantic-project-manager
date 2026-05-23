@@ -175,6 +175,11 @@ class RequestGetExperimentLabelMap(BaseModel):
     ]
 
 
+class RequestRenameGlobalLabel(BaseModel):
+    old_label_name: Annotated[str, Field(description="The old label name to rename.")]
+    new_label_name: Annotated[str, Field(description="The new label name to rename.")]
+
+
 # index
 class RequestGetIndex(BaseModel):
     pass

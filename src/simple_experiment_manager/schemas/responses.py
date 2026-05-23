@@ -97,6 +97,10 @@ class ResponseGetExperimentLabelMap(BaseResponse):
     ] = Field(default_factory=dict)
 
 
+class ResponseRenameGlobalLabel(BaseResponse):
+    pass
+
+
 # index
 class ResponseGetIndex(BaseResponse):
     pass
@@ -117,5 +121,6 @@ ExperimentManagerResponse: TypeAlias = (
     | ResponseRemoveGlobalLabels
     | ResponseUpdateExperimentLabels
     | ResponseGetLabelUsage
+    | ResponseRenameGlobalLabel
     | ResponseGetIndex
 )

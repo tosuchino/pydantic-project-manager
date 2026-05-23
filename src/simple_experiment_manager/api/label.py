@@ -168,3 +168,54 @@ def get_experiment_label_map(
         return res_schemas.ResponseGetExperimentLabelMap(
             is_success=False, message=str(e)
         )
+
+
+def rename_global_label(
+    request: req_schemas.RequestRenameGlobalLabel, context: ExperimentContext
+) -> res_schemas.ResponseRenameGlobalLabel:
+    """Renames a global label and updates its usage across all experiments."""
+    io = ExperimentDataIO(context)
+
+    try:
+        index = io.load_index()
+        old_label = request.old_label_name
+        new_label = request.new_label_name
+
+        # validate existence
+        if old_label not in index.global_labels:
+            return res_schemas.ResponseRenameGlobalLabel(
+                is_success=False,
+                message=f"Old label name to rename does not exist in the global labels: '{old_label}'.",
+            )
+
+        if new_label in index.global_labels:
+            return res_schemas.ResponseRenameGlobalLabel(
+                is_success=False,
+                message=f"New label name to rename already exists in the global labels: '{new_label}'.",
+            )
+
+        # rename the label in global label list
+        index.global_labels = [
+            label if label != old_label else new_label for label in index.global_labels
+        ]
+
+        # rename the label in the all relevant experiments
+        for _, meta in index.experiments.items():
+            if old_label not in meta.labels:
+                continue
+
+            meta.labels = [
+                label if label != old_label else new_label for label in meta.labels
+            ]
+
+        # save the updated index
+        io.save_index(index)
+
+        return res_schemas.ResponseRenameGlobalLabel(
+            is_success=True,
+            message=f"Label {old_label} has been renamed to {new_label} globally and in all relevant experiments.",
+            current_index=index,
+        )
+
+    except Exception as e:
+        return res_schemas.ResponseRenameGlobalLabel(is_success=False, message=str(e))

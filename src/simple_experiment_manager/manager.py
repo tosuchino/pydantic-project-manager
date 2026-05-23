@@ -380,6 +380,24 @@ class ExperimentManager:
         self._update_state(res)
         return OperationStatus(is_success=res.is_success, message=res.message)
 
+    def rename_global_label(self, old_name: str, new_name: str) -> OperationStatus:
+        """Renames a global label and updates its usage across all experiments.
+
+        Args:
+            old_name: The current name of the label to change.
+            new_name: The new name for the label.
+
+        Returns:
+            An `OperationStatus` instance.
+            It can be unpacked as `ok, msg = manager.rename_global_label()`.
+        """
+        req = req_schemas.RequestRenameGlobalLabel(
+            old_label_name=old_name, new_label_name=new_name
+        )
+        res = api_label.rename_global_label(request=req, context=self.ctx)
+        self._update_state(res)
+        return OperationStatus(is_success=res.is_success, message=res.message)
+
     def update_experiment_labels(
         self,
         labels: list[str],
