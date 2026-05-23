@@ -16,6 +16,28 @@ def create_experiment(
     io = ExperimentDataIO(context)
 
     try:
+        index = io.load_index()
+
+        # experiment directory name and identifier
+        dir_name = request.dir_name or _generate_next_experiment_dir_name(context)
+        experiment_name = request.experiment_name or dir_name
+
+        # logical name existence validation
+        if experiment_name in index.experiments:
+            return res_schemas.ResponseCreateExperiment(
+                is_success=False,
+                message=f"Experiment '{experiment_name}' already exists.",
+            )
+
+        # physical name existence validation
+        existing_dirs = {meta.dir_name for meta in index.experiments.values()}
+        if dir_name in existing_dirs:
+            return res_schemas.ResponseCreateExperiment(
+                is_success=False,
+                message=f"The experiment directory '{dir_name}' already exists or is reserved.",
+            )
+
+        # create experiment
         actual_config = request.config
         if not actual_config:
             default_config = context.default_config
@@ -23,10 +45,6 @@ def create_experiment(
                 actual_config = default_config.model_copy(deep=True)
             else:
                 actual_config = ConfigClass(**default_config.to_dict())
-
-        # experiment directory name and identifier
-        dir_name = request.dir_name or _generate_next_experiment_dir_name(context)
-        experiment_name = request.experiment_name or dir_name
 
         updated_index = _create_experiment_core(
             experiment_name=experiment_name,

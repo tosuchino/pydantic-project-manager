@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -11,21 +10,7 @@ from simple_experiment_manager.schemas import responses as res_schemas
 from simple_experiment_manager.schemas.contexts import ConfigClass, ExperimentContext
 from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.index import ExperimentIndex, ExperimentMetadata
-
-
-class OperationStatus(NamedTuple):
-    """Represents the status and message of a manager operation."""
-
-    is_success: bool
-    message: str
-
-    @property
-    def summary(self) -> str:
-        """Returns the summarized message."""
-        pre_msg = "Success" if self.is_success else "Error"
-        if not self.message:
-            return pre_msg
-        return f"{pre_msg}: {self.message}"
+from simple_experiment_manager.schemas.status import OperationStatus
 
 
 class ExperimentManager:

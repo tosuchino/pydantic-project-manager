@@ -10,12 +10,14 @@ from simple_experiment_manager.cli.editor import (
 )
 from simple_experiment_manager.cli.utils import (
     console,
+    handle_result,
+    handle_result_from_operation_status,
     initialize_context,
     resolve_manager,
 )
-from simple_experiment_manager.manager import ExperimentManager, OperationStatus
+from simple_experiment_manager.manager import ExperimentManager
 from simple_experiment_manager.schemas.contexts import ExperimentContext
-from simple_experiment_manager.schemas.enums import ExperimentSortKey
+from simple_experiment_manager.schemas.enums import ExperimentSortKey, OutputLevel
 
 experiment_app = typer.Typer(
     help="Manage experiments: create, list, delete and rename."
@@ -47,7 +49,10 @@ def command_list_experiment(
 
     # early return for no experiments
     if not manager.experiments:
-        console.print("[yellow]No experiments registered yet.[/yellow]")
+        handle_result(
+            level=OutputLevel.WARNING,
+            message="No experiments registered yet.",
+        )
         return
 
     # filter and sort experiments
@@ -57,13 +62,14 @@ def command_list_experiment(
 
     # system error
     if not filter_status.is_success:
-        console.print(f"[bold red]Error:[/bold red] {filter_status.summary}")
+        handle_result_from_operation_status(filter_status)
         return
 
     # no matching experiments
     if not experiment_names and target_labels is not None:
-        console.print(
-            f"[yellow]No experiments matched the labels: {', '.join(target_labels)}[/yellow]"
+        handle_result(
+            level=OutputLevel.WARNING,
+            message=f"No experiments matched the labels: {', '.join(target_labels)}",
         )
         return
 
@@ -114,7 +120,9 @@ def command_list_experiment(
 @experiment_app.command(name="create")
 def command_create_experiment(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Experiment name to create."),
+    name: str = typer.Argument(
+        ..., help="The logical name of the experiment to create."
+    ),
     description: str = typer.Option(
         "",
         "--message",
@@ -123,16 +131,17 @@ def command_create_experiment(
     ),
 ) -> None:
     """Creates a new experiment."""
+
     # experiment context
     manager: ExperimentManager = resolve_manager(ctx)
     experiment_ctx: ExperimentContext = manager.ctx
 
-    # validate experiment existence
+    # experiment name validation
     if name in manager.experiments:
-        failed_status = OperationStatus(
-            is_success=False, message=f"Experiment '{name}' already exists."
+        handle_result(
+            level=OutputLevel.ERROR,
+            message=f"Experiment '{name}' already exists. Please select a unique name before configuring.",
         )
-        print(failed_status.summary)
         return
 
     # edit config instance via editor
@@ -143,7 +152,7 @@ def command_create_experiment(
     status = manager.create_experiment(
         name=name, config=config_inst, description=description
     )
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="rename")
@@ -155,7 +164,7 @@ def command_rename_experiment(
     """Renames an existing experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.rename_experiment(old_name=old_name, new_name=new_name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="delete")
@@ -174,7 +183,7 @@ def command_delete_experiment(
 
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.delete_experiment(name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="switch")
@@ -185,7 +194,7 @@ def command_switch_experiment(
     """Switches the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.set_active_experiment(name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="show")
@@ -201,17 +210,19 @@ def command_show_experiment(
     """Shows the configuration for the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status, config = manager.get_experiment_config(name)
-    if status.is_success and config:
-        if isinstance(config, BaseModel):
-            data = config.model_dump(mode="json")
-        else:
-            data = config.to_dict(mode="json")
-        exp_name = name or manager.active_experiment
-        yaml_str = generate_yaml_string(ctx=manager.ctx, data=data)
-        console.print(f"\n[bold cyan]Experiment:[/bold cyan] {exp_name}")
-        console.print(Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True))
+    if not status.is_success or config is None:
+        handle_result_from_operation_status(status)
+        return
+
+    if isinstance(config, BaseModel):
+        data = config.model_dump(mode="json")
     else:
-        print(status.summary)
+        data = config.to_dict(mode="json")
+
+    exp_name = name or manager.active_experiment
+    yaml_str = generate_yaml_string(ctx=manager.ctx, data=data)
+    console.print(f"\n[bold cyan]Experiment:[/bold cyan] {exp_name}")
+    console.print(Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True))
 
 
 @experiment_app.command(name="update")
@@ -229,7 +240,7 @@ def command_update_experiment(
     status, config = manager.get_experiment_config(name)
 
     if not status.is_success or config is None:
-        print(status.summary)
+        handle_result_from_operation_status(status)
         return
 
     # update config via the editor
@@ -237,7 +248,7 @@ def command_update_experiment(
     new_config = edit_config_via_editor(ctx=manager.ctx, data=data)
 
     update_status = manager.update_experiment_config(config=new_config, name=name)
-    print(update_status.summary)
+    handle_result_from_operation_status(update_status)
 
 
 @experiment_app.command(name="copy")
@@ -265,7 +276,7 @@ def command_copy_experiment(
         dst_dir_name=dst_dir_name,
         description=description,
     )
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="describe")
@@ -284,4 +295,4 @@ def command_describe_experiment(
     """Sets a brief summary or note for an experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.update_experiment_description(description=description, name=name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
