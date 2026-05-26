@@ -51,7 +51,7 @@ def command_list_labels(
 
 
 @label_app.command(name="add")
-def command_add_labels_to_active_experiment(
+def command_add_labels_to_experiment(
     ctx: typer.Context,
     labels: list[str] = typer.Argument(..., help="A list of labels to add."),
     name: str | None = typer.Option(

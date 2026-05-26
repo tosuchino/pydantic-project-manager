@@ -82,8 +82,13 @@ class ExperimentManager:
         return self._index
 
     @property
-    def experiments(self) -> list[str]:
-        """Gets the set of all registered experiment names."""
+    def experiments(self) -> dict[str, ExperimentMetadata]:
+        """Provides the dictionary mapping logical experiment names to their metadata."""
+        return self.index.experiments
+
+    @property
+    def experiment_names(self) -> list[str]:
+        """Gets the set of all registered logical experiment names."""
         return list(self.index.experiments.keys())
 
     @property
@@ -468,6 +473,7 @@ class ExperimentManager:
             return OperationStatus(is_success=False, message=str(e)), None
 
     # information access methods
+
     def get_experiment_metadata(
         self, name: str | None = None
     ) -> tuple[OperationStatus, ExperimentMetadata | None]:
@@ -543,3 +549,71 @@ class ExperimentManager:
         except ValueError as e:
             status = OperationStatus(is_success=False, message=str(e))
             return status, None
+
+    # state validation queries
+
+    def exists_logical_name(self, name: str) -> bool:
+        """Checks if the given logical experiment name already exists in the system.
+
+        Args:
+            name: The logical experiment name to check.
+
+        Returns:
+            True if the logical name is already registered, False otherwise.
+        """
+        return self.index.has_logical_name(name)
+
+    def exists_physical_name(self, dir_name: str | None) -> bool:
+        """Checks if the given physical directory name is already reserved in the system.
+
+        Args:
+            dir_name: The physical directory name to check. If None, immediately returns False.
+
+        Returns:
+            True if the directory name is already in use, False otherwise.
+        """
+        return self.index.has_physical_name(dir_name)
+
+    def validate_logical_name_uniqueness(
+        self, name: str, pre_msg: str = "Name is already in use"
+    ) -> str | None:
+        """Validates that the given logical name does not already exist.
+
+        Args:
+            name: The logical experiment name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the name is already in use; otherwise `None`.
+        """
+        return self.index.validate_logical_name_uniqueness(name, pre_msg)
+
+    def validate_logical_name_existence(
+        self, name: str, pre_msg: str = "Name not found"
+    ) -> str | None:
+        """Validates that the specified logical name actually exists.
+
+        Args:
+            name: The logical experiment name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the name does not exist in the index; otherwise `None`.
+        """
+        return self.index.validate_logical_name_existence(name, pre_msg)
+
+    def validate_physical_name_uniqueness(
+        self,
+        dir_name: str | None,
+        pre_msg: str = "Directory already exists or is reserved",
+    ) -> str | None:
+        """Validates that the given physical directory name is not already in use.
+
+        Args:
+            dir_name: The physical directory name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the directory name is already in use; otherwise `None`.
+        """
+        return self.index.validate_physical_name_uniqueness(dir_name, pre_msg)

@@ -35,7 +35,11 @@ def command_list_experiment(
     target_labels: list[str] | None = typer.Option(
         None,
         "--label",
-        help="Label to filter experiments. Can be specified multiple times.",
+        "-l",
+        help=(
+            "Label to filter experiments. Can be specified multiple times. "
+            "(e.g., --label cpu --label gpu)"
+        ),
     ),
     sort_by: ExperimentSortKey = typer.Option(
         ExperimentSortKey.NAME, "--sort_by", help="Sort key."
@@ -123,6 +127,11 @@ def command_create_experiment(
     name: str = typer.Argument(
         ..., help="The logical name of the experiment to create."
     ),
+    dir_name: str | None = typer.Option(
+        None,
+        "--dir_name",
+        help="The directory name of the experiment to newly create. If None, automatically assigned. Defaults to None.",
+    ),
     description: str = typer.Option(
         "",
         "--message",
@@ -136,11 +145,19 @@ def command_create_experiment(
     manager: ExperimentManager = resolve_manager(ctx)
     experiment_ctx: ExperimentContext = manager.ctx
 
-    # experiment name validation
-    if name in manager.experiments:
+    # logical name validation
+    if error_msg := manager.validate_logical_name_uniqueness(name):
         handle_result(
             level=OutputLevel.ERROR,
-            message=f"Experiment '{name}' already exists. Please select a unique name before configuring.",
+            message=error_msg,
+        )
+        return
+
+    # pyshical direcotry name validation
+    if error_msg := manager.validate_physical_name_uniqueness(dir_name):
+        handle_result(
+            level=OutputLevel.ERROR,
+            message=error_msg,
         )
         return
 
@@ -163,6 +180,23 @@ def command_rename_experiment(
 ):
     """Renames an existing experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validations
+    if error_msg := manager.validate_logical_name_existence(
+        old_name,
+        pre_msg="Old name not found",
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_logical_name_uniqueness(
+        new_name,
+        pre_msg="New name is already in use",
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # execute rename
     status = manager.rename_experiment(old_name=old_name, new_name=new_name)
     handle_result_from_operation_status(status)
 
@@ -176,12 +210,20 @@ def command_delete_experiment(
     ),
 ):
     """Deletes a experiment and its directory."""
+    manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validation
+    if error_msg := manager.validate_logical_name_existence(name):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # confirmation for deleting
     if not force:
         confirm = typer.confirm(f"Are you sure you want to delete '{name}'?")
         if not confirm:
             raise typer.Abort()
 
-    manager: ExperimentManager = resolve_manager(ctx)
+    # execute delete
     status = manager.delete_experiment(name)
     handle_result_from_operation_status(status)
 
@@ -270,6 +312,25 @@ def command_copy_experiment(
 ):
     """Creates a new experiment by copying an existing one."""
     manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validations
+    if error_msg := manager.validate_logical_name_existence(
+        src_name, pre_msg="Source name not found"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_logical_name_uniqueness(
+        dst_name, pre_msg="Destination name is already in use"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_physical_name_uniqueness(dst_dir_name):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # execute copy
     status = manager.copy_experiment(
         src_name=src_name,
         dst_name=dst_name,

@@ -112,7 +112,51 @@ class ExperimentIndex(BaseModel):
         for meta in self.experiments.values():
             meta.labels = [label for label in meta.labels if label not in target_set]
 
-    def _validate_experiment_existence(self, experiment_name: str) -> str:
-        if experiment_name not in self.experiments:
-            raise ValueError(f"The experiment '{experiment_name}' does not exist.")
-        return experiment_name
+    # --- state queries ---
+
+    def has_logical_name(self, name: str) -> bool:
+        """Checks if the logical experiment name already exists in the index."""
+        return name in self.experiments
+
+    def has_physical_name(self, dir_name: str | None) -> bool:
+        """Checks if the physical directory name is already reserved in any experiment."""
+        if dir_name is None:
+            return False
+        existing_dirs = {meta.dir_name for meta in self.experiments.values()}
+        return dir_name in existing_dirs
+
+    # --- state validation queries ---
+
+    def validate_logical_name_uniqueness(
+        self, name: str, pre_msg: str = "Name is already in use"
+    ) -> str | None:
+        """Validates that the given logical experiment name does not already exist."""
+        if self.has_logical_name(name):
+            return f"{pre_msg}: '{name}'."
+        return None
+
+    def validate_logical_name_existence(
+        self, name: str, pre_msg: str = "Name not found"
+    ) -> str | None:
+        """Validates that the specified logical experiment name actually exists."""
+        if not self.has_logical_name(name):
+            return f"{pre_msg}: '{name}'."
+        return None
+
+    def validate_physical_name_uniqueness(
+        self,
+        dir_name: str | None,
+        pre_msg: str = "Directory already exists or is reserved",
+    ) -> str | None:
+        """Validates that the given physical directory name is not already in use."""
+        if self.has_physical_name(dir_name):
+            return f"{pre_msg}: '{dir_name}'."
+        return None
+
+    # --- internal exception guards ---
+
+    def _validate_experiment_existence(self, name: str) -> str:
+        """Internal guard to ensure the experiment exists. Raises ValueError if missing."""
+        if error_msg := self.validate_logical_name_existence(name):
+            raise ValueError(error_msg)
+        return name
