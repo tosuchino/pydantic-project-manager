@@ -39,15 +39,24 @@ class ExperimentManager:
         self._update_state(res)
 
     def _resolve_target_experiment(self, name: str | None) -> str:
-        """Returns the experiment name if provided, otherwise the name of the active experiment."""
+        """Returns the experiment name if provided, otherwise the name of the active experiment.
+
+        Args:
+            name: Logical name to resolve. If `None`, try to retrieve the active experiment name.
+
+        Return:
+            The valid logical name.
+
+        Raises:
+            - ValueError: If no name matches with any of the registered names.
+        """
         target = name or self.active_experiment
         if target is None:
-            raise ValueError(
-                "No experiment name provided and no active experiment is set."
-            )
+            raise ValueError("No logical name provided and no active target is set.")
 
-        if target not in self.experiments:
-            raise ValueError(f"Experiment not found: {target}")
+        if error_msg := self.validate_logical_name_existence(target):
+            raise ValueError(error_msg)
+
         return target
 
     # properties
@@ -552,7 +561,7 @@ class ExperimentManager:
 
     # state validation queries
 
-    def exists_logical_name(self, name: str) -> bool:
+    def has_logical_name(self, name: str) -> bool:
         """Checks if the given logical experiment name already exists in the system.
 
         Args:
@@ -563,16 +572,46 @@ class ExperimentManager:
         """
         return self.index.has_logical_name(name)
 
-    def exists_physical_name(self, dir_name: str | None) -> bool:
+    def has_physical_name(self, dir_name: str | None) -> bool:
         """Checks if the given physical directory name is already reserved in the system.
 
         Args:
-            dir_name: The physical directory name to check. If None, immediately returns False.
+            dir_name: The physical directory name (e.g., directory name on storage) to check.
+                If None, it immediately returns False.
 
         Returns:
-            True if the directory name is already in use, False otherwise.
+            True if the physical directory name is already in use, False otherwise.
         """
         return self.index.has_physical_name(dir_name)
+
+    def has_global_labels_intersection(self, labels: list[str]) -> bool:
+        """Checks if any of the given labels intersect with the global label list.
+
+        This method is highly useful for verifying whether a set of input labels contains
+        at least one existing global label before performing operations.
+
+        Args:
+            labels: A list of label names to verify against the global label list.
+
+        Returns:
+            True if at least one label exists globally, False otherwise.
+        """
+        return self.index.has_global_labels_intersection(labels)
+
+    def find_unknown_global_labels(self, labels: list[str]) -> set[str]:
+        """Identifies and returns labels from the input list that do not exist in the global list.
+
+        This can be used to gather invalid or unregistered labels to provide detailed
+        feedback to the user or to block invalid batch operations.
+
+        Args:
+            labels: A list of label names to check.
+
+        Returns:
+            A set containing the subset of input labels that are not registered globally.
+            Returns an empty set if all input labels exist globally.
+        """
+        return self.index.find_unknown_global_labels(labels)
 
     def validate_logical_name_uniqueness(
         self, name: str, pre_msg: str = "Name is already in use"
@@ -617,3 +656,45 @@ class ExperimentManager:
             The formatted error message if the directory name is already in use; otherwise `None`.
         """
         return self.index.validate_physical_name_uniqueness(dir_name, pre_msg)
+
+    def validate_global_label_existence(
+        self, label: str, pre_msg: str = "Label not found"
+    ) -> str | None:
+        """Validates that the specified global label actually exists.
+
+        Args:
+            label: The global label name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the label does not exist; otherwise, None.
+        """
+        return self.index.validate_global_label_existence(label, pre_msg)
+
+    def validate_global_label_uniqueness(
+        self, label: str, pre_msg: str = "Label already exists"
+    ) -> str | None:
+        """Validates that the given global label name does not already conflict.
+
+        Args:
+            label: The global label name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the label already conflicts; otherwise, None.
+        """
+        return self.index.validate_global_label_uniqueness(label, pre_msg)
+
+    def validate_global_labels_intersection(
+        self, labels: list[str], pre_msg: str = "No matching labels found"
+    ) -> str | None:
+        """Validates that at least one label from the input list exists globally.
+
+        Args:
+            labels: The list of global label names to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if none of the labels exist; otherwise, None.
+        """
+        return self.index.validate_global_labels_intersection(labels, pre_msg)

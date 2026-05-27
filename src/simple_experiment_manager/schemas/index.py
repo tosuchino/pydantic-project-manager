@@ -125,6 +125,14 @@ class ExperimentIndex(BaseModel):
         existing_dirs = {meta.dir_name for meta in self.experiments.values()}
         return dir_name in existing_dirs
 
+    def has_global_labels_intersection(self, labels: list[str]) -> bool:
+        """Checks if any of the given labels intersect with the global label list."""
+        return bool(set(labels) & set(self.global_labels))
+
+    def find_unknown_global_labels(self, labels: list[str]) -> set[str]:
+        """Returns a set of labels from the input list that do not exist globally."""
+        return set(labels) - set(self.global_labels)
+
     # --- state validation queries ---
 
     def validate_logical_name_uniqueness(
@@ -151,6 +159,41 @@ class ExperimentIndex(BaseModel):
         """Validates that the given physical directory name is not already in use."""
         if self.has_physical_name(dir_name):
             return f"{pre_msg}: '{dir_name}'."
+        return None
+
+    def validate_global_label_existence(
+        self, label: str, pre_msg: str = "Label not found"
+    ) -> str | None:
+        """Validates that the specified global label actually exists."""
+        if not self.has_global_labels_intersection([label]):
+            return f"{pre_msg}: '{label}'."
+        return None
+
+    def validate_global_label_uniqueness(
+        self, label: str, pre_msg: str = "Label already exists"
+    ) -> str | None:
+        """Validates that the given global label name does not already conflict."""
+        if self.has_global_labels_intersection([label]):
+            return f"{pre_msg}: '{label}'."
+        return None
+
+    def validate_global_labels_intersection(
+        self, labels: list[str], pre_msg: str = "No matching labels found"
+    ) -> str | None:
+        """Validates that at least one label from the input list exists globally."""
+        if not self.has_global_labels_intersection(labels):
+            return f"{pre_msg}: {labels}."
+        return None
+
+    def validate_global_labels_subset(
+        self,
+        labels: list[str],
+        pre_msg: str = "Unknown labels found. Please add them first",
+    ) -> str | None:
+        """Validates that all input labels already exist in the global label list."""
+        if unknown := self.find_unknown_global_labels(labels):
+            unknown_str = ", ".join(f"'{label}'" for label in sorted(unknown))
+            return f"{pre_msg}: {unknown_str}."
         return None
 
     # --- internal exception guards ---

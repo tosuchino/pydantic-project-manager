@@ -15,6 +15,13 @@ def add_labels_to_experiment(
         index = io.load_index()
         experiment_name = request.experiment_name
 
+        # validate experiment existence
+        if error_msg := index.validate_logical_name_existence(experiment_name):
+            return res_schemas.ResponseAddLabelsToExperiment(
+                is_success=False,
+                message=error_msg,
+            )
+
         # early return if input labels are empty
         if not request.labels:
             return res_schemas.ResponseAddLabelsToExperiment(
@@ -22,6 +29,8 @@ def add_labels_to_experiment(
                 message="No labels provided; nothing changed.",
                 current_index=index,
             )
+
+        # execute add labels
         new_labels = request.labels
 
         # retrive the current label status
@@ -62,10 +71,10 @@ def remove_global_labels(
         target_labels_set = set(request.labels)
 
         # validate existence
-        if not target_labels_set & set(index.global_labels):
+        if error_msg := index.validate_global_labels_intersection(target_labels):
             return res_schemas.ResponseRemoveGlobalLabels(
                 is_success=False,
-                message=f"No labels to remove from the global labels: '{target_labels}'.",
+                message=error_msg,
             )
 
         # remove the labels from global label list and cleanup
@@ -95,13 +104,10 @@ def update_experiment_labels(
         meta = index.get_experiment_metadata(experiment_name)
 
         # validate the subset relationship (request.labels ⊆ index.global_labels)
-        req_labels_set = set(request.labels)
-        global_labels_set = set(index.global_labels)
-        if not req_labels_set <= global_labels_set:
-            unknown_labels_set = req_labels_set - global_labels_set
+        if error_msg := index.validate_global_labels_subset(request.labels):
             return res_schemas.ResponseUpdateExperimentLabels(
                 is_success=False,
-                message=f"Unknown labels found: {unknown_labels_set}. Please add them first.",
+                message=error_msg,
             )
 
         # update and save index
@@ -181,17 +187,23 @@ def rename_global_label(
         old_label = request.old_label_name
         new_label = request.new_label_name
 
-        # validate existence
-        if old_label not in index.global_labels:
+        # validate label name existences
+        if error_msg := index.validate_global_label_existence(
+            old_label,
+            pre_msg="Old label not found",
+        ):
             return res_schemas.ResponseRenameGlobalLabel(
                 is_success=False,
-                message=f"Old label name to rename does not exist in the global labels: '{old_label}'.",
+                message=error_msg,
             )
 
-        if new_label in index.global_labels:
+        if error_msg := index.validate_global_label_uniqueness(
+            new_label,
+            pre_msg="New label is already in use",
+        ):
             return res_schemas.ResponseRenameGlobalLabel(
                 is_success=False,
-                message=f"New label name to rename already exists in the global labels: '{new_label}'.",
+                message=error_msg,
             )
 
         # rename the label in global label list
