@@ -3,10 +3,13 @@ import typer
 from simple_experiment_manager.cli.editor import edit_label_map_via_editor
 from simple_experiment_manager.cli.utils import (
     console,
+    handle_result,
+    handle_result_from_operation_status,
     initialize_context,
     resolve_manager,
 )
 from simple_experiment_manager.manager import ExperimentManager
+from simple_experiment_manager.schemas.enums import OutputLevel
 
 label_app = typer.Typer(help="Manage global labels and experiment assignments.")
 
@@ -28,7 +31,7 @@ def command_list_labels(
     status, label_usage = manager.get_label_usage()  # get label usage
 
     if not status.is_success:
-        print(status.summary)
+        handle_result_from_operation_status(status)
         return
 
     from rich.table import Table
@@ -50,7 +53,7 @@ def command_list_labels(
 
 
 @label_app.command(name="add")
-def command_add_labels_to_active_experiment(
+def command_add_labels_to_experiment(
     ctx: typer.Context,
     labels: list[str] = typer.Argument(..., help="A list of labels to add."),
     name: str | None = typer.Option(
@@ -62,8 +65,9 @@ def command_add_labels_to_active_experiment(
 ):
     """Adds labels to a specific experiment (defaults to active experiment)."""
     manager: ExperimentManager = resolve_manager(ctx)
-    status = manager.add_labels_to_experiment(experiment_name=name, labels=labels)
-    print(status.summary)
+    # add labels
+    status = manager.add_labels_to_experiment(name=name, labels=labels)
+    handle_result_from_operation_status(status)
 
 
 @label_app.command(name="assign")
@@ -84,7 +88,7 @@ def command_assign_labels(
 
     # retrive error
     if not status.is_success or label_map is None:
-        print(status.summary)
+        handle_result_from_operation_status(status)
         return
 
     # edits the label status
@@ -94,7 +98,7 @@ def command_assign_labels(
     selected_labels = [name for name, active in edited_map.items() if active]
 
     update_status = manager.update_experiment_labels(name=name, labels=selected_labels)
-    print(update_status.summary)
+    handle_result_from_operation_status(update_status)
 
 
 @label_app.command(name="remove")
@@ -103,12 +107,47 @@ def command_remove_labels(
     labels: list[str] = typer.Argument(..., help="A list of label names to remove."),
 ):
     """Remove labels from the global label list and all experiments."""
+    manager: ExperimentManager = resolve_manager(ctx)
+
+    # validate labels
+    if error_msg := manager.validate_global_labels_intersection(labels):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # confirm
     confirm = typer.confirm(
         f"Remove labels '{labels}' from the global list and all experiments?"
     )
     if not confirm:
         raise typer.Abort()
 
-    manager: ExperimentManager = resolve_manager(ctx)
     status = manager.remove_global_labels(labels)
-    print(status.summary)
+    handle_result_from_operation_status(status)
+
+
+@label_app.command(name="rename")
+def command_rename_global_label(
+    ctx: typer.Context,
+    old_name: str = typer.Argument(
+        ..., help="The current name of the global label to change."
+    ),
+    new_name: str = typer.Argument(..., help="The new name for the global label."),
+):
+    """Renames a global label and updates its usage across all experiments."""
+    manager: ExperimentManager = resolve_manager(ctx)
+
+    if error_msg := manager.validate_global_label_existence(
+        old_name, pre_msg="Old label not found"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_global_label_uniqueness(
+        new_name, pre_msg="New label is already in use"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # rename label via manager
+    status = manager.rename_global_label(old_name=old_name, new_name=new_name)
+    handle_result_from_operation_status(status)

@@ -10,11 +10,14 @@ from simple_experiment_manager.cli.editor import (
 )
 from simple_experiment_manager.cli.utils import (
     console,
+    handle_result,
+    handle_result_from_operation_status,
     initialize_context,
     resolve_manager,
 )
-from simple_experiment_manager.manager import ExperimentManager, OperationStatus
+from simple_experiment_manager.manager import ExperimentManager
 from simple_experiment_manager.schemas.contexts import ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey, OutputLevel
 
 experiment_app = typer.Typer(
     help="Manage experiments: create, list, delete and rename."
@@ -29,17 +32,49 @@ def callback(ctx: typer.Context) -> None:
 @experiment_app.command(name="list")
 def command_list_experiment(
     ctx: typer.Context,
-    is_sort_by_date: bool = typer.Option(
-        False, "--date", "-d", help="Sort experiments by creation date (newest first)."
+    target_labels: list[str] | None = typer.Option(
+        None,
+        "--label",
+        "-l",
+        help=(
+            "Label to filter experiments. Can be specified multiple times. "
+            "(e.g., --label cpu --label gpu)"
+        ),
+    ),
+    sort_by: ExperimentSortKey = typer.Option(
+        ExperimentSortKey.NAME, "--sort_by", help="Sort key."
+    ),
+    reverse: bool = typer.Option(
+        False, "--reverse", help="Sort results in descending order."
     ),
 ):
-    """Lists all experiments in the current library."""
+    """Lists experiments of the project."""
     manager: ExperimentManager = resolve_manager(ctx)
-    index = manager.index
 
     # early return for no experiments
-    if not index.experiments:
-        console.print("[yellow]No experiments registered yet.[/yellow]")
+    if not manager.experiments:
+        handle_result(
+            level=OutputLevel.WARNING,
+            message="No experiments registered yet.",
+        )
+        return
+
+    # filter and sort experiments
+    filter_status, experiment_names = manager.filter_experiments(
+        labels=target_labels, sort_by=sort_by.value, reverse=reverse
+    )
+
+    # system error
+    if not filter_status.is_success:
+        handle_result_from_operation_status(filter_status)
+        return
+
+    # no matching experiments
+    if not experiment_names and target_labels is not None:
+        handle_result(
+            level=OutputLevel.WARNING,
+            message=f"No experiments matched the labels: {', '.join(target_labels)}",
+        )
         return
 
     # table configuration
@@ -58,18 +93,12 @@ def command_list_experiment(
     table.add_column("Description", style="white", overflow="fold")
     table.add_column("Created At", style="dim", justify="right")
 
-    # experiment list
-    experiment_names = manager.experiments
-    if is_sort_by_date:
-        experiment_names.sort(
-            key=lambda n: index.get_experiment_metadata(n).created_at, reverse=True
-        )
-    else:
-        experiment_names.sort()
-
     # add experiment rows to the table
     for name in experiment_names:
-        meta = index.get_experiment_metadata(name)
+        meta_status, meta = manager.get_experiment_metadata(name)
+
+        if not meta_status.is_success or meta is None:
+            continue
 
         # format experiment metadata
         is_active = (
@@ -95,7 +124,14 @@ def command_list_experiment(
 @experiment_app.command(name="create")
 def command_create_experiment(
     ctx: typer.Context,
-    name: str = typer.Argument(..., help="Experiment name to create."),
+    name: str = typer.Argument(
+        ..., help="The logical name of the experiment to create."
+    ),
+    dir_name: str | None = typer.Option(
+        None,
+        "--dir_name",
+        help="The directory name of the experiment to newly create. If None, automatically assigned. Defaults to None.",
+    ),
     description: str = typer.Option(
         "",
         "--message",
@@ -104,16 +140,25 @@ def command_create_experiment(
     ),
 ) -> None:
     """Creates a new experiment."""
+
     # experiment context
     manager: ExperimentManager = resolve_manager(ctx)
     experiment_ctx: ExperimentContext = manager.ctx
 
-    # validate experiment existence
-    if name in manager.experiments:
-        failed_status = OperationStatus(
-            is_success=False, message=f"Experiment '{name}' already exists."
+    # logical name validation
+    if error_msg := manager.validate_logical_name_uniqueness(name):
+        handle_result(
+            level=OutputLevel.ERROR,
+            message=error_msg,
         )
-        print(failed_status.summary)
+        return
+
+    # pyshical direcotry name validation
+    if error_msg := manager.validate_physical_name_uniqueness(dir_name):
+        handle_result(
+            level=OutputLevel.ERROR,
+            message=error_msg,
+        )
         return
 
     # edit config instance via editor
@@ -124,7 +169,7 @@ def command_create_experiment(
     status = manager.create_experiment(
         name=name, config=config_inst, description=description
     )
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="rename")
@@ -135,8 +180,25 @@ def command_rename_experiment(
 ):
     """Renames an existing experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validations
+    if error_msg := manager.validate_logical_name_existence(
+        old_name,
+        pre_msg="Old name not found",
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_logical_name_uniqueness(
+        new_name,
+        pre_msg="New name is already in use",
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # execute rename
     status = manager.rename_experiment(old_name=old_name, new_name=new_name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="delete")
@@ -148,14 +210,22 @@ def command_delete_experiment(
     ),
 ):
     """Deletes a experiment and its directory."""
+    manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validation
+    if error_msg := manager.validate_logical_name_existence(name):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # confirmation for deleting
     if not force:
         confirm = typer.confirm(f"Are you sure you want to delete '{name}'?")
         if not confirm:
             raise typer.Abort()
 
-    manager: ExperimentManager = resolve_manager(ctx)
+    # execute delete
     status = manager.delete_experiment(name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="switch")
@@ -166,7 +236,7 @@ def command_switch_experiment(
     """Switches the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.set_active_experiment(name)
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="show")
@@ -182,17 +252,19 @@ def command_show_experiment(
     """Shows the configuration for the active experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status, config = manager.get_experiment_config(name)
-    if status.is_success and config:
-        if isinstance(config, BaseModel):
-            data = config.model_dump(mode="json")
-        else:
-            data = config.to_dict(mode="json")
-        exp_name = name or manager.active_experiment
-        yaml_str = generate_yaml_string(ctx=manager.ctx, data=data)
-        console.print(f"\n[bold cyan]Experiment:[/bold cyan] {exp_name}")
-        console.print(Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True))
+    if not status.is_success or config is None:
+        handle_result_from_operation_status(status)
+        return
+
+    if isinstance(config, BaseModel):
+        data = config.model_dump(mode="json")
     else:
-        print(status.summary)
+        data = config.to_dict(mode="json")
+
+    exp_name = name or manager.active_experiment
+    yaml_str = generate_yaml_string(ctx=manager.ctx, data=data)
+    console.print(f"\n[bold cyan]Experiment:[/bold cyan] {exp_name}")
+    console.print(Syntax(yaml_str, "yaml", theme="monokai", line_numbers=True))
 
 
 @experiment_app.command(name="update")
@@ -210,7 +282,7 @@ def command_update_experiment(
     status, config = manager.get_experiment_config(name)
 
     if not status.is_success or config is None:
-        print(status.summary)
+        handle_result_from_operation_status(status)
         return
 
     # update config via the editor
@@ -218,7 +290,7 @@ def command_update_experiment(
     new_config = edit_config_via_editor(ctx=manager.ctx, data=data)
 
     update_status = manager.update_experiment_config(config=new_config, name=name)
-    print(update_status.summary)
+    handle_result_from_operation_status(update_status)
 
 
 @experiment_app.command(name="copy")
@@ -240,13 +312,32 @@ def command_copy_experiment(
 ):
     """Creates a new experiment by copying an existing one."""
     manager: ExperimentManager = resolve_manager(ctx)
+
+    # name validations
+    if error_msg := manager.validate_logical_name_existence(
+        src_name, pre_msg="Source name not found"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_logical_name_uniqueness(
+        dst_name, pre_msg="Destination name is already in use"
+    ):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    if error_msg := manager.validate_physical_name_uniqueness(dst_dir_name):
+        handle_result(level=OutputLevel.ERROR, message=error_msg)
+        return
+
+    # execute copy
     status = manager.copy_experiment(
         src_name=src_name,
         dst_name=dst_name,
         dst_dir_name=dst_dir_name,
         description=description,
     )
-    print(status.summary)
+    handle_result_from_operation_status(status)
 
 
 @experiment_app.command(name="describe")
@@ -265,4 +356,4 @@ def command_describe_experiment(
     """Sets a brief summary or note for an experiment."""
     manager: ExperimentManager = resolve_manager(ctx)
     status = manager.update_experiment_description(description=description, name=name)
-    print(status.summary)
+    handle_result_from_operation_status(status)

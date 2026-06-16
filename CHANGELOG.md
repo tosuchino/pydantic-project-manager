@@ -1,5 +1,10 @@
 # Release notes
 
+## v0.4.0
+
+- Added label rename functionality to update global labels along with all the relevant experiments.
+- Implemented experiment filtering by labels.
+
 ## v0.3.0
 
 - Separated experiment logical names from physical directory names for better flexibility.

@@ -112,7 +112,94 @@ class ExperimentIndex(BaseModel):
         for meta in self.experiments.values():
             meta.labels = [label for label in meta.labels if label not in target_set]
 
-    def _validate_experiment_existence(self, experiment_name: str) -> str:
-        if experiment_name not in self.experiments:
-            raise ValueError(f"The experiment '{experiment_name}' does not exist.")
-        return experiment_name
+    # --- state queries ---
+
+    def has_logical_name(self, name: str) -> bool:
+        """Checks if the logical experiment name already exists in the index."""
+        return name in self.experiments
+
+    def has_physical_name(self, dir_name: str | None) -> bool:
+        """Checks if the physical directory name is already reserved in any experiment."""
+        if dir_name is None:
+            return False
+        existing_dirs = {meta.dir_name for meta in self.experiments.values()}
+        return dir_name in existing_dirs
+
+    def has_global_labels_intersection(self, labels: list[str]) -> bool:
+        """Checks if any of the given labels intersect with the global label list."""
+        return bool(set(labels) & set(self.global_labels))
+
+    def find_unknown_global_labels(self, labels: list[str]) -> set[str]:
+        """Returns a set of labels from the input list that do not exist globally."""
+        return set(labels) - set(self.global_labels)
+
+    # --- state validation queries ---
+
+    def validate_logical_name_uniqueness(
+        self, name: str, pre_msg: str = "Name is already in use"
+    ) -> str | None:
+        """Validates that the given logical experiment name does not already exist."""
+        if self.has_logical_name(name):
+            return f"{pre_msg}: '{name}'."
+        return None
+
+    def validate_logical_name_existence(
+        self, name: str, pre_msg: str = "Name not found"
+    ) -> str | None:
+        """Validates that the specified logical experiment name actually exists."""
+        if not self.has_logical_name(name):
+            return f"{pre_msg}: '{name}'."
+        return None
+
+    def validate_physical_name_uniqueness(
+        self,
+        dir_name: str | None,
+        pre_msg: str = "Directory already exists or is reserved",
+    ) -> str | None:
+        """Validates that the given physical directory name is not already in use."""
+        if self.has_physical_name(dir_name):
+            return f"{pre_msg}: '{dir_name}'."
+        return None
+
+    def validate_global_label_existence(
+        self, label: str, pre_msg: str = "Label not found"
+    ) -> str | None:
+        """Validates that the specified global label actually exists."""
+        if not self.has_global_labels_intersection([label]):
+            return f"{pre_msg}: '{label}'."
+        return None
+
+    def validate_global_label_uniqueness(
+        self, label: str, pre_msg: str = "Label already exists"
+    ) -> str | None:
+        """Validates that the given global label name does not already conflict."""
+        if self.has_global_labels_intersection([label]):
+            return f"{pre_msg}: '{label}'."
+        return None
+
+    def validate_global_labels_intersection(
+        self, labels: list[str], pre_msg: str = "No matching labels found"
+    ) -> str | None:
+        """Validates that at least one label from the input list exists globally."""
+        if not self.has_global_labels_intersection(labels):
+            return f"{pre_msg}: {labels}."
+        return None
+
+    def validate_global_labels_subset(
+        self,
+        labels: list[str],
+        pre_msg: str = "Unknown labels found. Please add them first",
+    ) -> str | None:
+        """Validates that all input labels already exist in the global label list."""
+        if unknown := self.find_unknown_global_labels(labels):
+            unknown_str = ", ".join(f"'{label}'" for label in sorted(unknown))
+            return f"{pre_msg}: {unknown_str}."
+        return None
+
+    # --- internal exception guards ---
+
+    def _validate_experiment_existence(self, name: str) -> str:
+        """Internal guard to ensure the experiment exists. Raises ValueError if missing."""
+        if error_msg := self.validate_logical_name_existence(name):
+            raise ValueError(error_msg)
+        return name

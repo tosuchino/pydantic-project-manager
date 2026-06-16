@@ -57,6 +57,15 @@ class ResponseGetExperimentConfig(BaseResponse):
     ] = Field(default=None)
 
 
+class ResponseFilterExperiments(BaseResponse):
+    experiments: Annotated[
+        list[str],
+        Field(
+            description="A list of logical experiment names that matched all the filter criteria."
+        ),
+    ]
+
+
 # label
 class ResponseAddLabelsToExperiment(BaseResponse):
     pass
@@ -88,6 +97,10 @@ class ResponseGetExperimentLabelMap(BaseResponse):
     ] = Field(default_factory=dict)
 
 
+class ResponseRenameGlobalLabel(BaseResponse):
+    pass
+
+
 # index
 class ResponseGetIndex(BaseResponse):
     pass
@@ -103,9 +116,11 @@ ExperimentManagerResponse: TypeAlias = (
     | ResponseRenameExperiment
     | ResponseGetExperimentConfig
     | ResponseGetExperimentLabelMap
+    | ResponseFilterExperiments
     | ResponseAddLabelsToExperiment
     | ResponseRemoveGlobalLabels
     | ResponseUpdateExperimentLabels
     | ResponseGetLabelUsage
+    | ResponseRenameGlobalLabel
     | ResponseGetIndex
 )

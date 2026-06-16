@@ -3,6 +3,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from simple_experiment_manager.schemas.contexts import ConfigClass
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.validators import validate_safe_name
 
 
@@ -121,6 +122,22 @@ class RequestGetExperimentConfig(BaseModel):
     ]
 
 
+class RequestFilterExperiments(BaseModel):
+    labels: Annotated[
+        list[str] | None,
+        Field(
+            description="A list of labels for AND-based filtering. If None, label filtering is skipped. Defaults to None."
+        ),
+    ] = Field(default=None)
+    sort_by: Annotated[
+        ExperimentSortKey,
+        Field(description="Sort key. Defaults to ExperimentSortKey.NAME."),
+    ] = Field(default=ExperimentSortKey.NAME)
+    reverse: Annotated[
+        bool, Field(description="If True, sort in descending order.")
+    ] = False
+
+
 # labels
 class RequestAddLabelsToExperiment(BaseModel):
     experiment_name: Annotated[
@@ -156,6 +173,11 @@ class RequestGetExperimentLabelMap(BaseModel):
     experiment_name: Annotated[
         str, Field(description="The name of the experiment to check label usage.")
     ]
+
+
+class RequestRenameGlobalLabel(BaseModel):
+    old_label_name: Annotated[str, Field(description="The old label name to rename.")]
+    new_label_name: Annotated[str, Field(description="The new label name to rename.")]
 
 
 # index

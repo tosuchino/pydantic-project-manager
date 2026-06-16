@@ -6,6 +6,7 @@ from simple_experiment_manager.io.handlers import ExperimentDataIO
 from simple_experiment_manager.schemas import requests as req_schemas
 from simple_experiment_manager.schemas import responses as res_schemas
 from simple_experiment_manager.schemas.contexts import ConfigClass, ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.index import ExperimentIndex, ExperimentMetadata
 
 
@@ -15,6 +16,27 @@ def create_experiment(
     io = ExperimentDataIO(context)
 
     try:
+        index = io.load_index()
+
+        # experiment directory name and identifier
+        dir_name = request.dir_name or _generate_next_experiment_dir_name(context)
+        experiment_name = request.experiment_name or dir_name
+
+        # logical name existence validation
+        if error_msg := index.validate_logical_name_uniqueness(experiment_name):
+            return res_schemas.ResponseCreateExperiment(
+                is_success=False,
+                message=error_msg,
+            )
+
+        # physical name existence validation
+        if error_msg := index.validate_physical_name_uniqueness(dir_name):
+            return res_schemas.ResponseCreateExperiment(
+                is_success=False,
+                message=error_msg,
+            )
+
+        # create experiment
         actual_config = request.config
         if not actual_config:
             default_config = context.default_config
@@ -22,10 +44,6 @@ def create_experiment(
                 actual_config = default_config.model_copy(deep=True)
             else:
                 actual_config = ConfigClass(**default_config.to_dict())
-
-        # experiment directory name and identifier
-        dir_name = request.dir_name or _generate_next_experiment_dir_name(context)
-        experiment_name = request.experiment_name or dir_name
 
         updated_index = _create_experiment_core(
             experiment_name=experiment_name,
@@ -58,10 +76,10 @@ def set_active_experiment(
         if target is not None:
             # set the active experiment
             # validate the experiment existence
-            if target not in index.experiments:
+            if error_msg := index.validate_logical_name_existence(target):
                 return res_schemas.ResponseSetActiveExperiment(
                     is_success=False,
-                    message=f"Experiment '{target}' does not exist.",
+                    message=error_msg,
                 )
             message = f"Experiment '{target}' is now active."
         else:
@@ -89,6 +107,13 @@ def delete_experiment(
     try:
         index = io.load_index()
         experiment_name = request.experiment_name
+
+        # validate experiment existence
+        if error_msg := index.validate_logical_name_existence(experiment_name):
+            return res_schemas.ResponseDeleteExperiment(
+                is_success=False,
+                message=error_msg,
+            )
 
         # retrieve the experiment directory path
         target_dir = index.get_experiment_dir(
@@ -124,12 +149,25 @@ def copy_experiment(
         index = io.load_index()
         src_experiment_name = request.src_experiment_name
         dst_experiment_name = request.dst_experiment_name
+        dst_dir_name = request.dst_dir_name or _generate_next_experiment_dir_name(
+            context
+        )
 
-        # validate experiment existence
-        if src_experiment_name not in index.experiments:
+        # validate relevant name existences
+        if error_msg := index.validate_logical_name_existence(src_experiment_name):
             return res_schemas.ResponseCopyExperiment(
                 is_success=False,
-                message=f"Experiment '{src_experiment_name}' does not exist.",
+                message=error_msg,
+            )
+        if error_msg := index.validate_logical_name_uniqueness(dst_experiment_name):
+            return res_schemas.ResponseCopyExperiment(
+                is_success=False,
+                message=error_msg,
+            )
+        if error_msg := index.validate_physical_name_uniqueness(dst_dir_name):
+            return res_schemas.ResponseCopyExperiment(
+                is_success=False,
+                message=error_msg,
             )
 
         # retrieve the souce metadata
@@ -139,15 +177,10 @@ def copy_experiment(
             root=context.experiment_root, experiment_name=src_experiment_name
         )
         src_config = io.load_config(config_file)
-
         src_labels = meta.labels
         new_description = request.description or meta.description
 
-        # determine destination experiment directory name
-        dst_dir_name = request.dst_dir_name or _generate_next_experiment_dir_name(
-            context
-        )
-
+        # create a new experiment by copy
         updated_index = _create_experiment_core(
             experiment_name=dst_experiment_name,
             dir_name=dst_dir_name,
@@ -174,6 +207,13 @@ def update_experiment_config(
     try:
         index = io.load_index()
         experiment_name = request.experiment_name
+
+        # validate experiment existence
+        if error_msg := index.validate_logical_name_existence(experiment_name):
+            return res_schemas.ResponseUpdateExperimentConfig(
+                is_success=False,
+                message=error_msg,
+            )
 
         # validate config type matching
         _validate_config_type(config=request.config, ctx=context)
@@ -207,9 +247,10 @@ def update_experiment_description(
         experiment_name = request.experiment_name
 
         # validate experiment existence
-        if experiment_name not in index.experiments:
+        if error_msg := index.validate_logical_name_existence(experiment_name):
             return res_schemas.ResponseUpdateExperimentDescription(
-                is_success=False, message=f"Experiment '{experiment_name}' not found."
+                is_success=False,
+                message=error_msg,
             )
 
         # update description
@@ -222,7 +263,7 @@ def update_experiment_description(
 
         return res_schemas.ResponseUpdateExperimentDescription(
             is_success=True,
-            message=f"Description for the experiment '{experiment_name}' updated to: {new_description}",
+            message=f"Description for the experiment '{experiment_name}' updated successfully.",
             current_index=index,
         )
 
@@ -243,10 +284,15 @@ def rename_experiment(
         new_experiment_name = request.new_experiment_name
 
         # validate experiment existence
-        if old_experiment_name not in index.experiments:
+        if error_msg := index.validate_logical_name_existence(old_experiment_name):
             return res_schemas.ResponseRenameExperiment(
                 is_success=False,
-                message=f"Experiment '{old_experiment_name}' not found.",
+                message=error_msg,
+            )
+        if error_msg := index.validate_logical_name_uniqueness(new_experiment_name):
+            return res_schemas.ResponseRenameExperiment(
+                is_success=False,
+                message=error_msg,
             )
 
         # pop the old metadata and re-assign to the new key
@@ -262,7 +308,10 @@ def rename_experiment(
 
         return res_schemas.ResponseRenameExperiment(
             is_success=True,
-            message=f"Experiment '{request.old_experiment_name}' renamed to '{request.new_experiment_name}'.",
+            message=(
+                f"Experiment '{request.old_experiment_name}' successfully renamed to "
+                f"'{request.new_experiment_name}'."
+            ),
             current_index=index,
         )
     except Exception as e:
@@ -290,7 +339,48 @@ def get_experiment_config(
         return res_schemas.ResponseGetExperimentConfig(is_success=False, message=str(e))
 
 
-# helper functions
+def filter_experiments(
+    request: req_schemas.RequestFilterExperiments, context: ExperimentContext
+) -> res_schemas.ResponseFilterExperiments:
+    """Filters and sorts experiments based on specified criteria."""
+    io = ExperimentDataIO(context)
+    try:
+        index = io.load_index()
+        all_experiments = index.experiments
+
+        # label filter
+        target_labels = request.labels
+        if target_labels is not None:
+            target_set = set(target_labels)
+            label_filtered = {
+                name: meta
+                for name, meta in all_experiments.items()
+                if target_set.issubset(set(meta.labels))
+            }
+        else:
+            label_filtered = all_experiments.copy()
+
+        # sort
+        experiment_names = list(label_filtered.keys())
+        match request.sort_by:
+            case ExperimentSortKey.NAME:
+                experiment_names.sort(reverse=request.reverse)
+            case ExperimentSortKey.CREATED_AT:
+                experiment_names.sort(
+                    key=lambda n: label_filtered[n].created_at, reverse=request.reverse
+                )
+        return res_schemas.ResponseFilterExperiments(
+            is_success=True,
+            message="Experiments have been successfully filtered and sorted.",
+            experiments=experiment_names,
+        )
+    except Exception as e:
+        return res_schemas.ResponseFilterExperiments(
+            is_success=False, message=str(e), experiments=list()
+        )
+
+
+# --- Helper Functions ---
 
 
 def _create_experiment_core(
@@ -302,13 +392,16 @@ def _create_experiment_core(
     labels: list[str] | None = None,
     description: str = "",
 ) -> ExperimentIndex:
-    """Creates a experiment configuration and updates the experiment index after validation.
+    """Writes the configuration file and updates the tracking index.
 
     This internal function handles shared logic for both `create` and `copy` operations.
+    Note:
+        Caller functions MUST validate that `experiment_name` and `dir_name`
+        do not conflict with existing records before calling this core function.
 
     Args:
-        experiment_name: The identifier for the new experiment.
-        dir_name: The experiment directory name to create.
+        experiment_name: The unique logical identifier for the new experiment.
+        dir_name: The physical directory name to create.
         config: The experiment configuration instance which matches the context's `default_config`.
         context: The experiment context.
         io: The experiment data IO handler.
@@ -333,14 +426,11 @@ def _create_experiment_core(
             f"Experiment directory already exists: {experiment_dir.name}"
         )
 
-    index = io.load_index()
-
-    # validate experiment name existence
-    if experiment_name in index.experiments:
-        raise ValueError(f"Experiment name '{experiment_name}' is already taken.")
-
     # save config file
     io.save_config(path=config_file, config=config)
+
+    # load the latest state to apply modifications
+    index = io.load_index()
 
     # update index file
     labels = labels if labels else list()
@@ -356,7 +446,7 @@ def _create_experiment_core(
 
 
 def _validate_config_type(config: Any, ctx: ExperimentContext) -> None:
-    "Validates the type of `config` based on the experiment context."
+    """Validates that the given config instance matches the schema defined in the context."""
     expected = ctx.default_config
 
     if isinstance(expected, BaseModel):
@@ -370,7 +460,7 @@ def _validate_config_type(config: Any, ctx: ExperimentContext) -> None:
 
 
 def _generate_next_experiment_dir_name(ctx: ExperimentContext) -> str:
-    "Generates the next available experiment directory name."
+    """Generates the next available physical experiment directory name using sequential numbers."""
 
     def gen_dir_name(prefix: str, digits: int, num: int) -> str:
         return f"{prefix}{str(num).zfill(digits)}"

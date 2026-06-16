@@ -1,5 +1,4 @@
 from pathlib import Path
-from typing import NamedTuple
 
 from pydantic import BaseModel
 
@@ -9,22 +8,9 @@ from simple_experiment_manager.api import label as api_label
 from simple_experiment_manager.schemas import requests as req_schemas
 from simple_experiment_manager.schemas import responses as res_schemas
 from simple_experiment_manager.schemas.contexts import ConfigClass, ExperimentContext
+from simple_experiment_manager.schemas.enums import ExperimentSortKey
 from simple_experiment_manager.schemas.index import ExperimentIndex, ExperimentMetadata
-
-
-class OperationStatus(NamedTuple):
-    """Represents the status and message of a manager operation."""
-
-    is_success: bool
-    message: str
-
-    @property
-    def summary(self) -> str:
-        """Returns the summarized message."""
-        pre_msg = "Success" if self.is_success else "Error"
-        if not self.message:
-            return pre_msg
-        return f"{pre_msg}: {self.message}"
+from simple_experiment_manager.schemas.status import OperationStatus
 
 
 class ExperimentManager:
@@ -52,13 +38,25 @@ class ExperimentManager:
         res = api_index.get_index(request=req, context=self.ctx)
         self._update_state(res)
 
-    def resolve_target_experiment(self, name: str | None) -> str:
-        """Returns the experiment name if provided, otherwise the name of the active experiment."""
+    def _resolve_target_experiment(self, name: str | None) -> str:
+        """Returns the experiment name if provided, otherwise the name of the active experiment.
+
+        Args:
+            name: Logical name to resolve. If `None`, try to retrieve the active experiment name.
+
+        Return:
+            The valid logical name.
+
+        Raises:
+            - ValueError: If no name matches with any of the registered names.
+        """
         target = name or self.active_experiment
         if target is None:
-            raise ValueError(
-                "No experiment name provided and no active experiment is set."
-            )
+            raise ValueError("No logical name provided and no active target is set.")
+
+        if error_msg := self.validate_logical_name_existence(target):
+            raise ValueError(error_msg)
+
         return target
 
     # properties
@@ -93,8 +91,13 @@ class ExperimentManager:
         return self._index
 
     @property
-    def experiments(self) -> list[str]:
-        """Gets the set of all registered experiment names."""
+    def experiments(self) -> dict[str, ExperimentMetadata]:
+        """Provides the dictionary mapping logical experiment names to their metadata."""
+        return self.index.experiments
+
+    @property
+    def experiment_names(self) -> list[str]:
+        """Gets the set of all registered logical experiment names."""
         return list(self.index.experiments.keys())
 
     @property
@@ -113,7 +116,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_metadata()
+        _, meta = self.get_experiment_metadata()
+        return meta
 
     @property
     def active_experiment_dir(self) -> Path | None:
@@ -121,7 +125,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_dir()
+        _, dir_path = self.get_experiment_dir()
+        return dir_path
 
     @property
     def active_experiment_config_file(self) -> Path | None:
@@ -129,7 +134,8 @@ class ExperimentManager:
 
         Returns None if no active experiment is set.
         """
-        return self.get_experiment_config_file()
+        _, config_path = self.get_experiment_config_file()
+        return config_path
 
     # operation methods
     def create_experiment(
@@ -151,7 +157,7 @@ class ExperimentManager:
                 If None, automatically assigned (e.g., 'exp_001'). Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.create_experiment()`.
         """
         req = req_schemas.RequestCreateExperiment(
             experiment_name=name,
@@ -170,7 +176,7 @@ class ExperimentManager:
            name: A experiment name to be active.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.set_active_experiment()`.
         """
         req = req_schemas.RequestSetActiveExperiment(experiment_name=name)
         res = api_experiment.set_active_experiment(request=req, context=self.ctx)
@@ -193,7 +199,7 @@ class ExperimentManager:
            name: A experiment name to delete.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.delete_experiment()`.
         """
         req = req_schemas.RequestDeleteExperiment(experiment_name=name)
         res = api_experiment.delete_experiment(request=req, context=self.ctx)
@@ -217,7 +223,7 @@ class ExperimentManager:
             description: A new description. If None, copies from the source experiment.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.copy_experiment()`.
         """
         req = req_schemas.RequestCopyExperiment(
             src_experiment_name=src_name,
@@ -239,10 +245,10 @@ class ExperimentManager:
             name: The name of the experiment to update. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_config()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentConfig(
                 experiment_name=target_name, config=config
             )
@@ -264,10 +270,10 @@ class ExperimentManager:
             old_name: The old experiment name. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.rename_experiment()`.
         """
         try:
-            target_old_name = self.resolve_target_experiment(old_name)
+            target_old_name = self._resolve_target_experiment(old_name)
             req = req_schemas.RequestRenameExperiment(
                 old_experiment_name=target_old_name, new_experiment_name=new_name
             )
@@ -287,11 +293,11 @@ class ExperimentManager:
             If None, the active experiment. Defaults to None.
 
         Returns:
-            A tuple of (`OperationStatus`, config).
+            A tuple of (An `OperationStatus` instance, config).
             It can be unpacked as `(ok, msg), config = manager.get_experiment_config()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestGetExperimentConfig(experiment_name=target_name)
             res = api_experiment.get_experiment_config(request=req, context=self.ctx)
             status = OperationStatus(is_success=res.is_success, message=res.message)
@@ -299,22 +305,56 @@ class ExperimentManager:
         except ValueError as e:
             return OperationStatus(is_success=False, message=str(e)), None
 
+    def filter_experiments(
+        self,
+        labels: list[str] | None = None,
+        sort_by: str = ExperimentSortKey.NAME.value,
+        reverse: bool = False,
+    ) -> tuple[OperationStatus, list[str]]:
+        """Filters and sorts experiments.
+
+        Args:
+            labels: A list of labels to filter experiments. If None, label filtering is skipped. Defaults to None.
+            sort_by: Sort key.　Available keys are defined by `ExperimentSortKey`. Defaults to `ExperimentSortKey.NAME.value`.
+            reverse: If True, sorted by the descending order. Defaults to False.
+
+        Returns:
+            A tuple of (An `OperationStatus` instance, experiments).
+            It can be unpacked as `(ok, msg), experiments = manager.filter_experiments()`.
+        """
+        try:
+            sort_by_enum = ExperimentSortKey(sort_by)
+        except ValueError:
+            valid_keys = [e.value for e in ExperimentSortKey]
+            status = OperationStatus(
+                is_success=False,
+                message=f"Invalid sort_by '{sort_by}'. Must be one of: {', '.join(valid_keys)}",
+            )
+            return status, []
+
+        req = req_schemas.RequestFilterExperiments(
+            labels=labels, sort_by=sort_by_enum, reverse=reverse
+        )
+        res = api_experiment.filter_experiments(request=req, context=self.ctx)
+        status = OperationStatus(is_success=res.is_success, message=res.message)
+        return status, res.experiments
+
     def add_labels_to_experiment(
         self,
         labels: list[str],
-        experiment_name: str | None = None,
+        name: str | None = None,
     ) -> OperationStatus:
         """Adds labels to the experiment and ensures they are registered in the global label list.
 
         Args:
            labels: A list of label names to add.
-           experiment_name: The experiment name to add labels to. If None, the active experiment name. Defaults to None.
+           name: The experiment name to add labels to. If None, the active experiment name. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.add_labels_to_experiment()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(experiment_name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestAddLabelsToExperiment(
                 labels=labels,
                 experiment_name=target_experiment_name,
@@ -332,10 +372,28 @@ class ExperimentManager:
            labels: A list of label names to remove from the global label list.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.remove_global_lables()`.
         """
         req = req_schemas.RequestRemoveGlobalLabels(labels=labels)
         res = api_label.remove_global_labels(request=req, context=self.ctx)
+        self._update_state(res)
+        return OperationStatus(is_success=res.is_success, message=res.message)
+
+    def rename_global_label(self, old_name: str, new_name: str) -> OperationStatus:
+        """Renames a global label and updates its usage across all experiments.
+
+        Args:
+            old_name: The current name of the label to change.
+            new_name: The new name for the label.
+
+        Returns:
+            An `OperationStatus` instance.
+            It can be unpacked as `ok, msg = manager.rename_global_label()`.
+        """
+        req = req_schemas.RequestRenameGlobalLabel(
+            old_label_name=old_name, new_label_name=new_name
+        )
+        res = api_label.rename_global_label(request=req, context=self.ctx)
         self._update_state(res)
         return OperationStatus(is_success=res.is_success, message=res.message)
 
@@ -351,10 +409,10 @@ class ExperimentManager:
            name: The name of the experiment whose labels will be updated. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_labels()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentLabels(
                 experiment_name=target_experiment_name, labels=labels
             )
@@ -374,10 +432,10 @@ class ExperimentManager:
             name: The name of the experiment to update. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            An `OperationStatus` instance. It can be unpacked as `ok, msg = manager.update_experiment_description()`.
         """
         try:
-            target_experiment_name = self.resolve_target_experiment(name)
+            target_experiment_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestUpdateExperimentDescription(
                 experiment_name=target_experiment_name, description=description
             )
@@ -393,7 +451,7 @@ class ExperimentManager:
         """Gets the label usage, providing a mapping of the labels to the sets of experiment names that use them.
 
         Returns:
-            A tuple of (`OperationStatus`, usage_dict).
+            A tuple of (An `OperationStatus` instance, usage_dict).
             It can be unpacked as `(ok, msg), usage = manager.get_label_usage()`.
         """
         req = req_schemas.RequestGetLabelUsage()
@@ -410,10 +468,11 @@ class ExperimentManager:
             name: The experiment name to acquire the label map. If None, the active experiment. Defaults to None.
 
         Returns:
-            An `OperationStatus` instance (is_success, message). It can be unpacked as `ok, msg = status`.
+            A tuple of (An `OperationStatus` instance, label_map).
+            It can be unpacked as `(ok, msg), label_map = manager.get_label_map()`.
         """
         try:
-            target_name = self.resolve_target_experiment(name)
+            target_name = self._resolve_target_experiment(name)
             req = req_schemas.RequestGetExperimentLabelMap(experiment_name=target_name)
             res = api_label.get_experiment_label_map(request=req, context=self.ctx)
             return OperationStatus(
@@ -423,50 +482,219 @@ class ExperimentManager:
             return OperationStatus(is_success=False, message=str(e)), None
 
     # information access methods
+
     def get_experiment_metadata(
         self, name: str | None = None
-    ) -> ExperimentMetadata | None:
+    ) -> tuple[OperationStatus, ExperimentMetadata | None]:
         """Gets the metadata for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            The ExperimentMetadata instance for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, metadata).
+            It can be unpacked as `(ok, msg), meta = manager.get_experiment_metadata()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_metadata(target)
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the experiment metadata.",
+            )
+            meta = self.index.get_experiment_metadata(target)
+            return status, meta
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None
 
-    def get_experiment_dir(self, name: str | None = None) -> Path | None:
+    def get_experiment_dir(
+        self, name: str | None = None
+    ) -> tuple[OperationStatus, Path | None]:
         """Gets the directory path for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            Path to the actual directory for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, exp_dir_path).
+            It can be unpacked as `(ok, msg), exp_dir_path = manager.get_experiment_dir()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_dir(
-            root=self.experiment_root, experiment_name=target
-        )
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the experiment directory path.",
+            )
+            dir_path = self.index.get_experiment_dir(
+                root=self.experiment_root, experiment_name=target
+            )
+            return status, dir_path
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None
 
-    def get_experiment_config_file(self, name: str | None = None) -> Path | None:
+    def get_experiment_config_file(
+        self, name: str | None = None
+    ) -> tuple[OperationStatus, Path | None]:
         """Gets the configuration file path for the specified experiment or the active experiment.
 
         Args:
             name: The experiment name. If None, the active experiment is chosen. Defaults to None.
 
         Returns:
-            Path to the configuration file for the experiment or None if no target is available.
+            A tuple of (An `OperationStatus` instance, config_file_path).
+            It can be unpacked as `(ok, msg), config_file_path = manager.get_config_file()`.
         """
-        target = name or self.active_experiment
-        if target is None:
-            return None
-        return self.index.get_experiment_config(
-            root=self.experiment_root, experiment_name=target
-        )
+        try:
+            target = self._resolve_target_experiment(name)
+            status = OperationStatus(
+                is_success=True,
+                message="Successfully retrieved the configuration path.",
+            )
+            config_path = self.index.get_experiment_config(
+                root=self.experiment_root, experiment_name=target
+            )
+            return status, config_path
+        except ValueError as e:
+            status = OperationStatus(is_success=False, message=str(e))
+            return status, None
+
+    # state validation queries
+
+    def has_logical_name(self, name: str) -> bool:
+        """Checks if the given logical experiment name already exists in the system.
+
+        Args:
+            name: The logical experiment name to check.
+
+        Returns:
+            True if the logical name is already registered, False otherwise.
+        """
+        return self.index.has_logical_name(name)
+
+    def has_physical_name(self, dir_name: str | None) -> bool:
+        """Checks if the given physical directory name is already reserved in the system.
+
+        Args:
+            dir_name: The physical directory name (e.g., directory name on storage) to check.
+                If None, it immediately returns False.
+
+        Returns:
+            True if the physical directory name is already in use, False otherwise.
+        """
+        return self.index.has_physical_name(dir_name)
+
+    def has_global_labels_intersection(self, labels: list[str]) -> bool:
+        """Checks if any of the given labels intersect with the global label list.
+
+        This method is highly useful for verifying whether a set of input labels contains
+        at least one existing global label before performing operations.
+
+        Args:
+            labels: A list of label names to verify against the global label list.
+
+        Returns:
+            True if at least one label exists globally, False otherwise.
+        """
+        return self.index.has_global_labels_intersection(labels)
+
+    def find_unknown_global_labels(self, labels: list[str]) -> set[str]:
+        """Identifies and returns labels from the input list that do not exist in the global list.
+
+        This can be used to gather invalid or unregistered labels to provide detailed
+        feedback to the user or to block invalid batch operations.
+
+        Args:
+            labels: A list of label names to check.
+
+        Returns:
+            A set containing the subset of input labels that are not registered globally.
+            Returns an empty set if all input labels exist globally.
+        """
+        return self.index.find_unknown_global_labels(labels)
+
+    def validate_logical_name_uniqueness(
+        self, name: str, pre_msg: str = "Name is already in use"
+    ) -> str | None:
+        """Validates that the given logical name does not already exist.
+
+        Args:
+            name: The logical experiment name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the name is already in use; otherwise `None`.
+        """
+        return self.index.validate_logical_name_uniqueness(name, pre_msg)
+
+    def validate_logical_name_existence(
+        self, name: str, pre_msg: str = "Name not found"
+    ) -> str | None:
+        """Validates that the specified logical name actually exists.
+
+        Args:
+            name: The logical experiment name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the name does not exist in the index; otherwise `None`.
+        """
+        return self.index.validate_logical_name_existence(name, pre_msg)
+
+    def validate_physical_name_uniqueness(
+        self,
+        dir_name: str | None,
+        pre_msg: str = "Directory already exists or is reserved",
+    ) -> str | None:
+        """Validates that the given physical directory name is not already in use.
+
+        Args:
+            dir_name: The physical directory name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the directory name is already in use; otherwise `None`.
+        """
+        return self.index.validate_physical_name_uniqueness(dir_name, pre_msg)
+
+    def validate_global_label_existence(
+        self, label: str, pre_msg: str = "Label not found"
+    ) -> str | None:
+        """Validates that the specified global label actually exists.
+
+        Args:
+            label: The global label name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the label does not exist; otherwise, None.
+        """
+        return self.index.validate_global_label_existence(label, pre_msg)
+
+    def validate_global_label_uniqueness(
+        self, label: str, pre_msg: str = "Label already exists"
+    ) -> str | None:
+        """Validates that the given global label name does not already conflict.
+
+        Args:
+            label: The global label name to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if the label already conflicts; otherwise, None.
+        """
+        return self.index.validate_global_label_uniqueness(label, pre_msg)
+
+    def validate_global_labels_intersection(
+        self, labels: list[str], pre_msg: str = "No matching labels found"
+    ) -> str | None:
+        """Validates that at least one label from the input list exists globally.
+
+        Args:
+            labels: The list of global label names to validate.
+            pre_msg: The prefix message to be appended to the error output.
+
+        Returns:
+            The formatted error message if none of the labels exist; otherwise, None.
+        """
+        return self.index.validate_global_labels_intersection(labels, pre_msg)

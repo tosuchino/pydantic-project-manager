@@ -4,6 +4,8 @@ import typer
 from rich.console import Console
 
 from simple_experiment_manager.manager import ExperimentManager
+from simple_experiment_manager.schemas.enums import OutputLevel
+from simple_experiment_manager.schemas.status import OperationStatus
 
 console = Console()
 
@@ -11,21 +13,55 @@ MANAGER_ATTR: Final[str] = "experiment_manager"
 
 
 def handle_result(
-    is_success: bool, message: str, terminate_on_error: bool = True
+    level: OutputLevel,
+    message: str,
+    success_prefix: str = "Success",
+    error_prefix: str = "Error",
+    warning_prefix: str = "Warning",
+    terminate_on_error: bool = True,
 ) -> None:
     """Handles the result message display by the use of `Rich`.
 
     Args:
-        is_success: If the operation completed successfully.
+        level: An `OutputLevel` instance.
         message: The message to display in console.
+        success_prefix: Customized prefix for success messages. Defaults to "Success".
+        error_prefix: Customized prefix for error messages. Defaults to "Error".
+        warning_prefix: Customized prefix for warning messages. Defaults to "Warning".
         terminate_on_error: If `True`, the failure operation will be terminated. Defaults to `True`.
     """
-    if is_success:
-        console.print(f"[green]Success:[/green] {message}")
-    else:
-        console.print(f"[red]Error:[/red] {message}")
-        if terminate_on_error:
-            raise typer.Exit(code=1)
+    match level:
+        case OutputLevel.SUCCESS:
+            pre_msg = success_prefix
+            color = "green"
+        case OutputLevel.ERROR:
+            pre_msg = error_prefix
+            color = "red"
+        case OutputLevel.WARNING:
+            pre_msg = warning_prefix
+            color = "yellow"
+
+    full_msg = f"{pre_msg}: {message}" if message else pre_msg
+    console.print(f"[{color}]{full_msg}[/{color}]")
+
+    if level == OutputLevel.ERROR and terminate_on_error:
+        raise typer.Exit(code=1)
+
+
+def handle_result_from_operation_status(
+    status: OperationStatus, terminate_on_error: bool = True
+) -> None:
+    """Handles the result message display by the use of `Rich`　specifically for an `OperationStatus` instance.
+
+    Args:
+        status: The `OperationStatus` instance from the manager operation.
+        terminate_on_error: If `True`, the failure operation will be terminated. Defaults to `True`.
+    """
+    handle_result(
+        level=status.level,
+        message=status.message,
+        terminate_on_error=terminate_on_error,
+    )
 
 
 def initialize_context(ctx: typer.Context) -> None:
